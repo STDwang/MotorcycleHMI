@@ -1,0 +1,14 @@
+{
+  "name": "motorcycle-hmi",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "serve": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test:browser": "node scripts/browser-check.mjs",
+    "test:lap": "node scripts/lap-check.mjs"
+  },
+  "engines": { "node": ">=22" },
+  "devDependencies": { "@playwright/test": "1.64.1" }
+}

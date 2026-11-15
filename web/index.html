@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#162d29">
+  <meta name="description" content="APEX 山湖环线：全代码生成的摩托车第一视角 3D 驾驶游戏，实时 CAN/DBC 观察与仪表。">
+  <title>APEX / 山湖环线 · 第一视角骑行</title>
+  <link rel="icon" href="./mark.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <canvas id="world" aria-label="代码生成的山湖公路与摩托车第一视角 3D 场景"></canvas>
+  <div class="vignette" aria-hidden="true"></div>
+  <header class="topbar">
+    <a id="portfolio" class="brand" href="#about"><svg viewBox="0 0 30 30" aria-hidden="true"><path d="M3 25 15 4l12 21H3Zm8-5h8l-4-7-4 7Z"/></svg><b>APEX</b><span>MOTO / FIELD LAB</span></a>
+    <div class="route-heading"><i></i><span>山湖环线 <small>ALPINE LOOP</small></span><b id="track-length">— km</b></div>
+    <div class="top-actions"><button id="sound" aria-pressed="false" title="代码合成音效">声音 <span>OFF</span></button><button id="quality" aria-pressed="false">画质 <span>高</span></button><button id="fullscreen" title="全屏">⛶</button><button id="help" aria-expanded="false" aria-controls="about">?</button></div>
+  </header>
+  <main class="hud">
+    <aside class="glass telemetry" aria-label="CAN 报文观察窗">
+      <div class="panel-head"><div><span class="eyebrow">LIVE TELEMETRY</span><h1>CAN 信号观察</h1></div><span id="bus-state" class="status-pill">载入中</span></div>
+      <div class="bus-summary"><span><i class="dot" id="bus-dot"></i> CAN 2.0 · SYNTHETIC</span><b>20 Hz</b></div>
+      <div class="frame-list" id="frames" aria-label="最新 CAN 帧"></div>
+      <div class="signal-heading"><span>DBC DECODED</span><span>VALUE / QUALITY</span></div>
+      <div class="signal-list" id="signals"></div>
+      <div class="bus-footer"><span>RX <b id="rx">0</b></span><span>INVALID <b id="rejected">0</b></span><a href="./vehicle.dbc" download title="下载合成 DBC">DBC ↓</a><button id="export" title="导出诊断快照">JSON ↓</button></div>
+      <div class="signal-chain"><span>ECU</span><i>→</i><span>CAN</span><i>→</i><span>DBC</span><i>→</i><span>HMI</span></div>
+    </aside>
+    <section class="ride-center" aria-label="骑行进度"><div class="sector-label"><span id="sector">SECTOR 01</span><span id="ride-state">READY TO RIDE</span></div><div class="progress-track"><i id="progress"></i><b></b><b></b><b></b></div><div class="ride-stats"><span><small>本圈计时</small><b id="timer">00:00.0</b></span><span><small>检查点</small><b id="checkpoint">0 <em>/ 4</em></b></span><span><small>剩余距离</small><b id="remaining">— <em>km</em></b></span></div></section>
+    <aside class="glass dashboard" aria-label="摩托车仪表与控制">
+      <div class="panel-head"><div><span class="eyebrow">RIDER DISPLAY</span><h2>骑行仪表</h2></div><span class="vehicle">APEX <b>650</b></span></div>
+      <div class="lamp-row"><span id="left-lamp" aria-label="左转向灯">◀</span><span id="beam-lamp" aria-label="远光灯">≋D</span><span id="abs-lamp" aria-label="ABS 故障">ABS</span><span id="right-lamp" aria-label="右转向灯">▶</span></div>
+      <div class="speed-wrap"><div><strong id="speed">0</strong><span>km/h</span></div><div class="gear"><small>GEAR</small><b id="gear">N</b><span id="mode-badge">ROAD</span></div></div>
+      <div class="rpm-head"><span>ENGINE <b>×1000 r/min</b></span><strong id="rpm">1.2</strong></div><div id="rpm-bars" class="rpm-bars" role="meter" aria-label="发动机转速" aria-valuemin="0" aria-valuemax="14000"></div><div class="rpm-ticks"><span>0</span><span>4</span><span>8</span><span>12</span></div>
+      <div class="metrics"><div><span>燃油余量</span><strong id="fuel">78<small>%</small></strong><i class="fuel-bar"><b id="fuel-fill"></b></i></div><div><span>冷却液温度</span><strong id="temperature">82<small>°C</small></strong><small id="temp-state">NORMAL</small></div><div><span>前胎压 / bar</span><strong id="front-pressure">2.35</strong></div><div><span>后胎压 / bar</span><strong id="rear-pressure">2.60</strong></div></div>
+      <div class="mini-nav"><svg id="minimap" viewBox="0 0 150 130" aria-label="当前赛道示意"><path id="track-map"/><path id="map-progress"/><circle id="map-position" r="4"/></svg><div><span>NEXT CHECKPOINT</span><strong id="next-checkpoint">01 <small>/ 04</small></strong><p>山湖环线 · 单圈计时</p><small id="penalties">碰撞 0 · 罚时 +0s</small></div></div>
+      <div class="alert" id="alert" role="status" aria-live="polite"><span id="alert-symbol">✓</span><div><b id="alert-title">车辆状态正常</b><p id="alert-detail">信号有效，准备出发。</p></div><button id="acknowledge" disabled>确认</button></div>
+      <div class="control-shelf"><div class="shelf-label"><span>骑行模式</span><small id="mode-hint">≤5 km/h 可切换</small></div><div class="modes" id="modes"><button data-mode="0" aria-pressed="true">ROAD</button><button data-mode="1" aria-pressed="false">SPORT</button><button data-mode="2" aria-pressed="false">RAIN</button></div><div class="lamps"><button id="left" aria-pressed="false">◀ 左转</button><button id="beam" aria-pressed="false">≋D 远光</button><button id="right" aria-pressed="false">右转 ▶</button></div></div>
+      <details class="faults"><summary>故障注入 <span>ENGINEERING MODE ＋</span></summary><div class="fault-grid" id="scenarios"><button data-scenario="normal" aria-pressed="true">正常</button><button data-scenario="tire" aria-pressed="false">低胎压</button><button data-scenario="overheat" aria-pressed="false">过热</button><button data-scenario="abs" aria-pressed="false">ABS 故障</button><button data-scenario="fuel" aria-pressed="false">低燃油</button><button data-scenario="offline" aria-pressed="false">CAN 中断</button></div></details>
+    </aside>
+  </main>
+  <section class="start-card glass" id="start-card" aria-label="开始骑行"><div class="card-mark">自由骑行 / TIME ATTACK</div><h2>下一道弯，<br><em>由你掌控。</em></h2><p>穿过松林，沿湖驶向山脊。<br>一辆摩托，一圈公路，一条实时信号链。</p><div class="start-actions"><button id="start" class="primary">开始骑行 <span>↗</span></button><button id="start-auto">自动巡航</button></div><div class="start-controls"><span><kbd>W</kbd><kbd>S</kbd> 油门 / 刹车</span><span><kbd>A</kbd><kbd>D</kbd> 转向</span></div><small>绕开路障，碰撞罚时 +3s。音效需点击右上角开启。</small></section>
+  <section class="glass finish-card" id="finish-card" hidden aria-label="本圈成绩"><span class="eyebrow">LOOP COMPLETED</span><h2>山湖环线，完成。</h2><strong id="result-time">—</strong><p id="result-detail"></p><p id="best-time"></p><button id="again" class="primary">再跑一圈 ↗</button></section>
+  <div id="notice" class="toast" role="status" aria-live="polite">场景生成中…</div>
+  <div class="mobile-tabs"><button id="telemetry-toggle" aria-expanded="false" aria-controls="mobile-can">CAN 报文</button><button id="dashboard-toggle" aria-expanded="false">完整仪表</button></div>
+  <div class="touch-controls" aria-label="触屏驾驶"><div><button data-touch="left" aria-label="向左转向">◀</button><button data-touch="right" aria-label="向右转向">▶</button></div><div><button data-touch="brake" aria-label="踩刹车">刹车</button><button data-touch="throttle" aria-label="加油门">油门</button></div></div>
+  <footer class="bottom-bar"><div class="key-guide"><span><kbd>W</kbd> 油门</span><span><kbd>S</kbd> 刹车</span><span><kbd>A</kbd><kbd>D</kbd> 转向</span><span><kbd>P</kbd> 暂停</span><span><kbd>R</kbd> 重来</span></div><div class="ride-actions"><button id="cruise" aria-pressed="false">巡航 OFF</button><button id="pause" disabled>暂停</button><button id="reset">重来 ↺</button></div><div class="render-info"><i class="dot"></i><span id="fps">—</span> FPS <span>· WEBGL / CODE GENERATED</span></div></footer>
+  <dialog id="about"><button id="close-help" aria-label="关闭说明">×</button><span class="eyebrow">APEX / MOTO FIELD LAB</span><h2>一条能骑行、也能检查的信号链。</h2><p>W / ↑ 加速，S / ↓ 刹车，A / D 或左右方向键转向。P 暂停，R 重开，L 开关远光灯，Q / E 控制转向灯。触屏可按住屏幕下方按键。</p><p>道路沿样条曲线生成，车辆采用公路相对坐标的街机驾驶：方向控制横向位置，镜头随公路与倾角变化。驶出沥青会减速，碰到护栏或路障罚时 3 秒，通过四个检查点后完成一圈。自动巡航可用于观看与信号演示，不计入手动最佳成绩。</p><p>山体、道路、树林、路障、摩托车、纹理和路牌由代码生成；发动机、风噪与提示音由 Web Audio 合成。3D 引擎为 Three.js（MIT），不使用外部模型、贴图或音频文件。</p><p>模拟 ECU → 三类 CAN 帧 → DBC 解码 → 信号质量 / 告警 → 仪表。左侧显示真实经过本项目解码器的帧与数值。故障可在右侧注入，600 ms 通信超时后仪表读数失效，3D 游戏仍可继续操控。</p><p class="boundary">个人 Web 工程演示；合成 CAN/DBC、街机动力学，不是实车、Qt/QML 或车规测试。参考 <a href="https://github.com/mrdoob/Starter-Kit-Racing" target="_blank" rel="noreferrer">Starter-Kit-Racing</a> 的赛车模板组织思路；游戏资产与实现独立生成。<a href="./vendor/THREE-LICENSE.txt" target="_blank">Three.js 许可证</a>。</p></dialog>
+  <noscript><div class="startup-error">此 3D 骑行游戏需要 JavaScript 与 WebGL2。请开启后刷新。</div></noscript>
+  <script type="module" src="./app.mjs"></script>
+</body>
+</html>
