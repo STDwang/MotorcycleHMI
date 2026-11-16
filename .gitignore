@@ -10,3 +10,6 @@ playwright-report/
 *.log
 .DS_Store
 Thumbs.db
+# WorkBuddy 应用发布记录（本地保留，不入库）
+.workbuddy/
+.wbapp_*.genie

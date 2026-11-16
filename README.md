@@ -2,7 +2,7 @@
 
 浏览器 3D 摩托骑行与实时 HMI 实验台。从赛道车辆状态，经模拟 CAN 报文、信号解码与仪表状态机，驱动同一块虚拟 TFT。
 
-**[在线试玩](https://stdwang.github.io/MotorcycleHMI/)**
+**[在线试玩](https://stdwang.github.io/MotorcycleHMI/)** ｜ **[国内备用入口](https://wbapp-5qspg4vbu8mo6se3cxxq2a.app.workbuddy.host/?sharecode=S7BRNCGVMQ)**（WorkBuddy 静态镜像，国内访问主站不稳定时使用；分享时请保留 `?sharecode=` 参数）
 
 ![骑行画面](assets/riding.png)
 
@@ -60,7 +60,7 @@ npm run test:lap
 
 ## 构建与部署
 
-`npm run build` 清理并生成 `dist/`，其中的文件可以直接托管到静态服务器，支持仓库子路径。当前在线版本使用本仓库 `gh-pages` 分支根目录，通过 GitHub Pages 发布。
+`npm run build` 清理并生成 `dist/`，其中的文件可以直接托管到静态服务器，支持仓库子路径。在线版本有两套：本仓库 `gh-pages` 分支根目录通过 GitHub Pages 发布，以及同一份静态产物托管的 WorkBuddy 应用作为国内备用入口；两者内容一致。
 
 ## 结构
 
