@@ -36,6 +36,7 @@ const damp = (current, target, rate, dt) => current + (target - current) * (1 - 
 export class ClusterModel {
   constructor(store, options = {}) {
     this.store = store; this.tank = options.tank ?? 17; this.map = options.map ?? [];
+    this.reducedMotion = !!options.reducedMotion;
     this.settings = { lang: 'zh', units: 'metric', theme: 'auto', page: 0, ...options.settings };
     this.alertState = new Map(ALERTS.map(a => [a.code, { since: null, clearSince: null, active: false, acked: false, shownAt: 0 }]));
     this.dtcs = []; this.crcSeen = new Map(); this.reset();
@@ -58,7 +59,9 @@ export class ClusterModel {
       const errors = store.frames.get(message.id).crcErrors, seen = this.crcSeen.get(message.name) ?? { errors: 0, time: -1e9 };
       if (errors !== seen.errors) { seen.errors = errors; seen.time = now; } this.crcSeen.set(message.name, seen); crcFail[message.name] = now - seen.time < 1000;
     }
-    this.clock += dt; this.blink = Math.floor(this.clock * 2.6) % 2 === 0;
+    this.clock += dt;
+    // Reduced motion: telltales stay steadily lit instead of blinking, so information is not carried by flashing.
+    this.blink = this.reducedMotion ? true : Math.floor(this.clock * 2.6) % 2 === 0;
 
     // Power-state machine: OFF -> BOOT (logo) -> CHECK (bulb check + needle sweep) -> RUN.
     const ignition = raw.Ignition ?? (anyAlive ? 2 : null); this.powerTime += dt;

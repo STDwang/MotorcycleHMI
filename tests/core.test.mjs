@@ -91,3 +91,19 @@ test('ambient light sensor switches the day/night theme with hysteresis', () => 
   r.ecu.ambientLight = 4000; r.run(1.5); assert.equal(r.hmi.view.night, true);
   r.ecu.ambientLight = 60000; r.run(1.5); assert.equal(r.hmi.view.night, false);
 });
+
+test('reduced motion keeps blink steady so turn signals and telltales never flash', () => {
+  const r = rig(); r.hmi.reducedMotion = true;
+  r.ecu.left = true; r.run(4); // complete the boot / check sequence into RUN
+  assert.equal(r.hmi.view.power, 'run');
+  const blinks = new Set();
+  for (let i = 0; i < 120 * 3; i++) {
+    r.run(1 / 120);
+    blinks.add(r.hmi.view.blink);
+    assert.equal(r.hmi.view.telltales.left, true, 'left indicator stays lit, not blinking');
+  }
+  assert.deepEqual([...blinks], [true]);
+  const normal = rig(), normalBlinks = new Set();
+  for (let i = 0; i < 120 * 3; i++) { normal.run(1 / 120); normalBlinks.add(normal.hmi.view.blink); }
+  assert.ok(normalBlinks.has(true) && normalBlinks.has(false), 'default mode still blinks');
+});

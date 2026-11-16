@@ -32,6 +32,15 @@ test('rookie throttle-only riding finishes a lap; pause freezes simulation and r
   s.start('practice'); assert.equal(s.now, 0); assert.equal(s.race.player.laps.length, 0);
 });
 
+test('reduced-motion preference is passed to the cluster and survives mode restarts', () => {
+  const s = new Session(messages, { mode: 'demo', reducedMotion: true });
+  assert.equal(s.hmi.reducedMotion, true);
+  s.start('race'); assert.equal(s.hmi.reducedMotion, true);
+  s.start('bench'); assert.equal(s.hmi.reducedMotion, true);
+  const plain = new Session(messages, { mode: 'demo' });
+  assert.equal(plain.hmi.reducedMotion, false);
+});
+
 test('shared bus honours every DBC cyclic deadline within ten percent', () => {
   const s = new Session(messages, { mode: 'bench' }), observed = new Map();
   s.bus.subscribe(frame => {
