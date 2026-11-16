@@ -18,13 +18,14 @@ export class Session {
   constructor(messages, options = {}) {
     this.messages = messages; this.track = options.track ?? new Track();
     this.environment = options.environment ?? 'clear'; this.assist = options.assist ?? 'rookie';
+    this.reducedMotion = !!options.reducedMotion;
     this.settings = { lang: 'zh', units: 'metric', theme: 'auto', page: 0 };
     this.start(options.mode ?? 'demo');
   }
   start(mode = 'demo') {
     this.mode = mode; this.auto = true; this.paused = false; this.now = 0;
     this.bus = new CanBus(this.messages); this.store = new SignalStore(this.messages); this.ecu = new Electronics();
-    this.hmi = new ClusterModel(this.store, { map: this.track.minimap(), settings: this.settings });
+    this.hmi = new ClusterModel(this.store, { map: this.track.minimap(), settings: this.settings, reducedMotion: this.reducedMotion });
     this.settings = this.hmi.settings;
     this.bus.subscribe((frame, now) => this.store.receive(frame, now));
     this.race = new Race(this.track, { mode: mode === 'race' ? 'race' : 'practice', laps: 2, opponents: mode === 'practice' || mode === 'bench' ? 0 : 7, assist: this.assist, grip: ENVIRONMENTS[this.environment].grip });

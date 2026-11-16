@@ -14,9 +14,12 @@ function notify(value) { text('notice', value); $('notice').classList.add('visib
 
 try {
   const response = await fetch('./core/vehicle.dbc'); if (!response.ok) throw new Error('DBC 加载失败');
-  const session = new Session(parseDBC(await response.text())), messages = session.messages;
+  const motion = matchMedia('(prefers-reduced-motion: reduce)');
+  const session = new Session(parseDBC(await response.text()), { reducedMotion: motion.matches }), messages = session.messages;
   const cluster = new ClusterRenderer($('cluster')), audio = new RideAudio();
   const world = new RideWorld($('world'), session.track, $('cluster')); world.setEntries(session.race.entries);
+  world.reducedMotion = motion.matches;
+  motion.addEventListener?.('change', event => { session.reducedMotion = event.matches; session.hmi.reducedMotion = event.matches; world.reducedMotion = event.matches; });
   world.setQuality(innerWidth < 600 ? 'low' : innerWidth < 1000 ? 'medium' : 'high'); $('quality').value = world.quality;
   const keys = new Set(), touches = new Map(), signalRows = new Map();
   let accumulator = 0, lastTime = performance.now(), hudTime = 0, frameMs = 16.7, slowTime = 0, finished = false, bootAt = null;

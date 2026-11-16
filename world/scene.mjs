@@ -8,7 +8,7 @@ export class RideWorld {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.1;
     this.scene = new THREE.Scene(); this.scene.fog = new THREE.FogExp2(0xb5c9cc, .0015);
-    this.camera = new THREE.PerspectiveCamera(58, 1, .08, 2300); this.cameraMode = 'chase'; this.quality = 'high'; this.slowTime = 0;
+    this.camera = new THREE.PerspectiveCamera(58, 1, .08, 2300); this.cameraMode = 'chase'; this.quality = 'high'; this.slowTime = 0; this.reducedMotion = false;
     this.sun = new THREE.DirectionalLight(0xffe4bc, 3.2); this.sun.position.set(-350, 600, -180); this.scene.add(this.sun);
     this.sky = new THREE.HemisphereLight(0xbfd9ed, 0x343e24, 2.3); this.scene.add(this.sky);
     this.materials = {}; this.makeCircuit(); this.batchSurfaces(); this.makeScenery(); this.bikes = []; this.rain = this.makeRain();
@@ -156,17 +156,17 @@ export class RideWorld {
       pos.copy(player.lean.localToWorld(new THREE.Vector3(0, mode === 'cluster' ? 1.55 : 1.64, mode === 'cluster' ? -.05 : -.12)));
       target.copy(player.lean.localToWorld(new THREE.Vector3(0, mode === 'cluster' ? 1.23 : 1.48, mode === 'cluster' ? .36 : 18)));
     }
-    else if (mode === 'cinema') { pos.addScaledVector(forward, -7).addScaledVector(right, 7 * Math.sin(time * .08)).addScaledVector(UP, 3.5); target.addScaledVector(forward, 5).addScaledVector(UP, 1); }
+    else if (mode === 'cinema') { pos.addScaledVector(forward, -7).addScaledVector(right, this.reducedMotion ? 0 : 7 * Math.sin(time * .08)).addScaledVector(UP, 3.5); target.addScaledVector(forward, 5).addScaledVector(UP, 1); }
     else { pos.addScaledVector(forward, -4.6 - pose.speed * .012).addScaledVector(UP, 2.1); target.addScaledVector(forward, 8).addScaledVector(UP, .7); }
     // Interpolated poses already remove fixed-step judder. World-space camera damping at 280 km/h
     // would leave the cockpit several metres behind the motorcycle.
     const k = this.started && mode === 'cinema' ? 1 - Math.exp(-dt * 12) : 1;
     this.cameraPosition.lerp(pos, k); this.aim.lerp(target, k); this.started = true;
     this.camera.position.copy(this.cameraPosition); this.camera.up.set(0, 1, 0);
-    if (mode === 'cockpit' || mode === 'cluster') { this.camera.up.set(-Math.sin(pose.lean) * .7 * Math.cos(Math.atan2(f.tx, f.tz)), Math.cos(pose.lean * .7), Math.sin(pose.lean) * .7 * Math.sin(Math.atan2(f.tx, f.tz))).normalize(); }
+    if (!this.reducedMotion && (mode === 'cockpit' || mode === 'cluster')) { this.camera.up.set(-Math.sin(pose.lean) * .7 * Math.cos(Math.atan2(f.tx, f.tz)), Math.cos(pose.lean * .7), Math.sin(pose.lean) * .7 * Math.sin(Math.atan2(f.tx, f.tz))).normalize(); }
     this.camera.lookAt(this.aim);
-    if (mode === 'chase') this.camera.rotateZ(-pose.lean * .12);
-    this.camera.fov = mode === 'cluster' ? 48 : 54 + Math.min(15, pose.speed * .19); this.camera.updateProjectionMatrix();
+    if (!this.reducedMotion && mode === 'chase') this.camera.rotateZ(-pose.lean * .12);
+    this.camera.fov = mode === 'cluster' ? 48 : this.reducedMotion ? 54 : 54 + Math.min(15, pose.speed * .19); this.camera.updateProjectionMatrix();
     this.bikes.at(-1).rider.visible = mode !== 'cockpit' && mode !== 'cluster';
     this.lights.forEach((mat, i) => mat.color.set(session.race.lights > i ? 0xff2017 : 0x341819));
     const tunnel = this.track.tunnelWeight(pose.s, 8); this.headlight.intensity = this.environment === 'rain' || tunnel > .1 ? 60 : 0;
@@ -180,7 +180,7 @@ export class RideWorld {
     if (this.quality === 'low') this.renderer.render(this.scene, this.camera);
     else {
       this.renderer.setRenderTarget(this.target); this.renderer.render(this.scene, this.camera); this.renderer.setRenderTarget(null);
-      this.post.uniforms.speed.value = Math.max(0, (pose.speed - 25) / 40); this.renderer.render(this.postScene, this.postCamera);
+      this.post.uniforms.speed.value = this.reducedMotion ? 0 : Math.max(0, (pose.speed - 25) / 40); this.renderer.render(this.postScene, this.postCamera);
     }
   }
 }
