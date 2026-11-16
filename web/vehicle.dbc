@@ -1,22 +1,135 @@
-VERSION "APEX educational demo 1.0 - synthetic signals, not an OEM protocol"
+VERSION "APEX-MOTO-2.0 synthetic demo network, not an OEM protocol"
+
 NS_ :
-BS_:
-BU_: ECU HMI
 
-BO_ 256 Powertrain: 8 ECU
- SG_ Speed : 0|16@1+ (0.01,0) [0|240] "km/h" HMI
- SG_ RPM : 16|16@1+ (1,0) [0|14000] "rpm" HMI
- SG_ Gear : 32|8@1+ (1,0) [0|6] "" HMI
- SG_ Temperature : 40|8@1+ (1,-40) [-40|150] "degC" HMI
- SG_ Fuel : 48|8@1+ (0.5,0) [0|100] "%" HMI
+BS_: 500000
 
-BO_ 257 TirePressure: 8 ECU
- SG_ FrontPressure : 0|16@1+ (0.01,0) [0|5] "bar" HMI
- SG_ RearPressure : 16|16@1+ (0.01,0) [0|5] "bar" HMI
+BU_: IPC ECM ABS IMU BCM TPMS TBOX
 
-BO_ 258 Controls: 8 ECU
- SG_ Mode : 0|8@1+ (1,0) [0|2] "" HMI
- SG_ LeftIndicator : 8|1@1+ (1,0) [0|1] "" HMI
- SG_ RightIndicator : 9|1@1+ (1,0) [0|1] "" HMI
- SG_ HighBeam : 10|1@1+ (1,0) [0|1] "" HMI
- SG_ ABSFault : 11|1@1+ (1,0) [0|1] "" HMI
+BO_ 256 ENGINE_1: 8 ECM
+ SG_ EngineSpeed : 0|16@1+ (0.25,0) [0|16383.8] "rpm" IPC
+ SG_ ThrottlePos : 16|8@1+ (0.4,0) [0|100] "%" IPC
+ SG_ Gear : 24|4@1+ (1,0) [0|6] "" IPC
+ SG_ EngineRunning : 28|1@1+ (1,0) [0|1] "" IPC
+ SG_ QuickShiftActive : 29|1@1+ (1,0) [0|1] "" IPC
+ SG_ EngineLoad : 32|8@1+ (0.4,0) [0|100] "%" IPC
+ SG_ ENGINE_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ ENGINE_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 257 ENGINE_2: 8 ECM
+ SG_ CoolantTemp : 0|8@1+ (1,-40) [-40|215] "degC" IPC
+ SG_ OilPressureLow : 8|1@1+ (1,0) [0|1] "" IPC
+ SG_ MIL : 9|1@1+ (1,0) [0|1] "" IPC
+ SG_ FuelLevel : 16|8@1+ (0.5,0) [0|100] "%" IPC
+ SG_ FuelRate : 24|12@1+ (0.02,0) [0|81.9] "l/h" IPC
+ SG_ BatteryVoltage : 40|8@1+ (0.1,0) [0|25.5] "V" IPC
+ SG_ ENGINE_2_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ ENGINE_2_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 288 ABS_1: 8 ABS
+ SG_ FrontWheelSpeed : 0|13@1+ (0.05,0) [0|409.55] "km/h" IPC
+ SG_ RearWheelSpeed : 13|13@1+ (0.05,0) [0|409.55] "km/h" IPC
+ SG_ BrakePressure : 26|8@1+ (0.5,0) [0|127.5] "bar" IPC
+ SG_ BrakeSwitch : 34|1@1+ (1,0) [0|1] "" IPC
+ SG_ ABSActive : 35|1@1+ (1,0) [0|1] "" IPC
+ SG_ ABSFault : 36|1@1+ (1,0) [0|1] "" IPC
+ SG_ ABS_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ ABS_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 304 IMU_1: 8 IMU
+ SG_ LeanAngle : 0|12@1- (0.05,0) [-102.4|102.35] "deg" IPC
+ SG_ PitchAngle : 12|10@1- (0.1,0) [-51.2|51.1] "deg" IPC
+ SG_ LongAccel : 22|10@1- (0.05,0) [-25.6|25.55] "m/s2" IPC
+ SG_ LatAccel : 32|10@1- (0.05,0) [-25.6|25.55] "m/s2" IPC
+ SG_ YawRate : 42|10@1- (0.2,0) [-102.4|102.2] "deg/s" IPC
+ SG_ IMU_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ IMU_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 320 TCS_1: 8 ABS
+ SG_ TCSActive : 0|1@1+ (1,0) [0|1] "" IPC
+ SG_ TCSFault : 1|1@1+ (1,0) [0|1] "" IPC
+ SG_ AWCActive : 2|1@1+ (1,0) [0|1] "" IPC
+ SG_ TCSLevel : 4|4@1+ (1,0) [0|8] "" IPC
+ SG_ RideMode : 8|2@1+ (1,0) [0|2] "" IPC
+ SG_ GripUsage : 16|8@1+ (0.5,0) [0|127.5] "%" IPC
+ SG_ TCS_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ TCS_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 512 BCM_1: 8 BCM
+ SG_ TurnLeft : 0|1@1+ (1,0) [0|1] "" IPC
+ SG_ TurnRight : 1|1@1+ (1,0) [0|1] "" IPC
+ SG_ HighBeam : 2|1@1+ (1,0) [0|1] "" IPC
+ SG_ LowBeam : 3|1@1+ (1,0) [0|1] "" IPC
+ SG_ SideStand : 4|1@1+ (1,0) [0|1] "" IPC
+ SG_ Ignition : 5|2@1+ (1,0) [0|2] "" IPC
+ SG_ AmbientLight : 8|10@1+ (100,0) [0|102300] "lx" IPC
+ SG_ AmbientTemp : 18|8@1+ (0.5,-40) [-40|87.5] "degC" IPC
+ SG_ Odometer : 26|24@1+ (0.1,0) [0|1.67772e+06] "km" IPC
+ SG_ BCM_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ BCM_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 528 TPMS_1: 8 TPMS
+ SG_ FrontPressure : 0|8@1+ (0.02,0) [0|5.1] "bar" IPC
+ SG_ RearPressure : 8|8@1+ (0.02,0) [0|5.1] "bar" IPC
+ SG_ FrontTyreTemp : 16|8@1+ (1,-40) [-40|215] "degC" IPC
+ SG_ RearTyreTemp : 24|8@1+ (1,-40) [-40|215] "degC" IPC
+ SG_ TPMSFault : 32|1@1+ (1,0) [0|1] "" IPC
+ SG_ TPMS_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ TPMS_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 768 NAV_1: 8 TBOX
+ SG_ NextTurnDist : 0|12@1+ (1,0) [0|4095] "m" IPC
+ SG_ NextTurnDir : 12|2@1+ (1,0) [0|2] "" IPC
+ SG_ NextTurnNum : 14|5@1+ (1,0) [0|31] "" IPC
+ SG_ TrackPos : 19|14@1+ (0.0001,0) [0|1] "" IPC
+ SG_ RecommendedSpeed : 33|9@1+ (1,0) [0|511] "km/h" IPC
+ SG_ NAV_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ NAV_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 784 LAP_1: 8 TBOX
+ SG_ LapNumber : 0|4@1+ (1,0) [0|15] "" IPC
+ SG_ LapsTotal : 4|4@1+ (1,0) [0|15] "" IPC
+ SG_ Position : 8|4@1+ (1,0) [0|15] "" IPC
+ SG_ Entrants : 12|4@1+ (1,0) [0|15] "" IPC
+ SG_ CurrentLapTime : 16|20@1+ (0.01,0) [0|10485.8] "s" IPC
+ SG_ Sector : 36|2@1+ (1,0) [0|3] "" IPC
+ SG_ RaceFlag : 38|3@1+ (1,0) [0|4] "" IPC
+ SG_ LAP_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ LAP_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+BO_ 785 LAP_2: 8 TBOX
+ SG_ LastLapTime : 0|20@1+ (0.01,0) [0|10485.8] "s" IPC
+ SG_ BestLapTime : 20|20@1+ (0.01,0) [0|10485.8] "s" IPC
+ SG_ LapDelta : 40|12@1- (0.01,0) [-20.48|20.47] "s" IPC
+ SG_ LAP_2_Counter : 52|4@1+ (1,0) [0|15] "" IPC
+ SG_ LAP_2_CRC : 56|8@1+ (1,0) [0|255] "" IPC
+
+CM_ BO_ 256 "Engine speed and driver demand";
+CM_ BO_ 288 "Wheel speeds and brake state; FrontWheelSpeed is the displayed vehicle speed";
+CM_ BO_ 304 "6-axis inertial unit: lean, pitch and accelerations";
+CM_ BO_ 320 "Traction / wheelie control state and ride mode";
+CM_ BO_ 512 "Body: lamps, ignition, ambient light sensor";
+CM_ BO_ 528 "Tyre pressure monitoring";
+CM_ BO_ 768 "Circuit guidance from the connectivity unit";
+CM_ BO_ 784 "Lap timer";
+CM_ BO_ 785 "Lap timer history";
+CM_ BO_ 257 "Engine thermal, fuel and electrical state";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 10000;
+BA_DEF_DEF_ "GenMsgCycleTime" 100;
+BA_ "GenMsgCycleTime" BO_ 256 10;
+BA_ "GenMsgCycleTime" BO_ 257 100;
+BA_ "GenMsgCycleTime" BO_ 288 20;
+BA_ "GenMsgCycleTime" BO_ 304 20;
+BA_ "GenMsgCycleTime" BO_ 320 20;
+BA_ "GenMsgCycleTime" BO_ 512 100;
+BA_ "GenMsgCycleTime" BO_ 528 500;
+BA_ "GenMsgCycleTime" BO_ 768 100;
+BA_ "GenMsgCycleTime" BO_ 784 50;
+BA_ "GenMsgCycleTime" BO_ 785 200;
+
+VAL_ 256 Gear 0 "N" 1 "1" 2 "2" 3 "3" 4 "4" 5 "5" 6 "6" ;
+VAL_ 320 RideMode 0 "ROAD" 1 "SPORT" 2 "RAIN" ;
+VAL_ 512 Ignition 0 "OFF" 1 "ON" 2 "RUN" ;
+VAL_ 768 NextTurnDir 0 "NONE" 1 "LEFT" 2 "RIGHT" ;
+VAL_ 784 RaceFlag 0 "NONE" 1 "GREEN" 2 "YELLOW" 3 "CHEQUERED" 4 "RED" ;
