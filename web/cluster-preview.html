@@ -1,0 +1,18 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>APEX TFT cluster preview</title><body style="margin:0;background:#333;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:8px;padding:8px"><script type="module">
+import { ClusterRenderer } from './hmi/cluster.mjs'; import { ClusterModel } from './hmi/model.mjs';
+import { parseDBC, CanBus, SignalStore } from './core/can.mjs'; import { Electronics } from './core/ecu.mjs'; import { Track } from './core/track.mjs'; import { Race } from './core/race.mjs';
+const messages = parseDBC(await (await fetch('./core/vehicle.dbc')).text()), track = new Track();
+const cases = [['SPORT', 'day', 'zh', 0, 40, []], ['SPORT', 'night', 'zh', 2, 52, ['abs_off']], ['ROAD', 'day', 'en', 1, 30, []], ['ROAD', 'night', 'zh', 4, 35, ['overheat', 'puncture']], ['RAIN', 'night', 'zh', 0, 46, []], ['RAIN', 'day', 'zh', 3, 20, ['low_fuel']], ['SPORT', 'night', 'zh', 0, 1.9, []], ['SPORT', 'night', 'zh', 0, .8, []]];
+for (const [mode, theme, lang, page, seconds, faults] of cases) {
+  const canvas = document.createElement('canvas'); canvas.style.width = '100%'; document.body.append(canvas);
+  const bus = new CanBus(messages), store = new SignalStore(messages), ecu = new Electronics(), hmi = new ClusterModel(store, { map: track.minimap(160), settings: { lang, theme, page } }); bus.subscribe((f, n) => store.receive(f, n)); ecu.mode = mode;
+  const race = new Race(track, { laps: 3 }); race.beginCountdown(); let now = 0;
+  for (let i = 0; i < seconds * 120; i++) { race.step(1 / 120, {}, true); const e = race.player, nc = track.nextCorner(e.bike.s);
+    if (i === Math.floor((seconds - 4) * 120)) for (const f of faults) { ecu.setFault(f, true); }
+    ecu.nav = { dist: nc.distance, dir: nc.distance > 0 || 1 ? (nc.corner.dir > 0 ? 2 : 1) : 0, num: nc.corner.number, pos: e.bike.s / track.length, speed: track.at(track.lineV, nc.corner.apex) * 3.6 };
+    ecu.lap = { lap: Math.max(1, e.lap), laps: 3, position: e.position, entrants: 8, time: e.lapTime, sector: e.sector, flag: 1, last: e.last, best: Number.isFinite(e.best) ? e.best : 0, delta: e.delta };
+    ecu.step(1 / 120, e.bike, { light: theme === 'night' ? 300 : 60000 }); now += 1000 / 120; bus.advance(now, ecu.source); hmi.update(now, 1 / 120); }
+  const r = new ClusterRenderer(canvas); r.draw(hmi.view); console.log(mode, r.drawMs);
+}
+document.title = 'done';
+</script>
