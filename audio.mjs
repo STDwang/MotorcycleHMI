@@ -26,6 +26,9 @@ export class RideAudio {
       this.windFilter = ctx.createBiquadFilter(); this.windFilter.type = 'bandpass'; this.windFilter.frequency.value = 1000; this.windFilter.Q.value = .45;
       this.windGain = ctx.createGain(); this.windGain.gain.value = 0;
       noise.connect(this.windFilter); this.windFilter.connect(this.windGain); this.windGain.connect(this.master); noise.start();
+      this.tyreFilter = ctx.createBiquadFilter(); this.tyreFilter.type = 'bandpass'; this.tyreFilter.frequency.value = 1800; this.tyreFilter.Q.value = 4;
+      this.tyreGain = ctx.createGain(); this.tyreGain.gain.value = 0;
+      noise.connect(this.tyreFilter); this.tyreFilter.connect(this.tyreGain); this.tyreGain.connect(this.master);
     }
     await this.context.resume(); this.enabled = true;
   }
@@ -33,18 +36,20 @@ export class RideAudio {
   silence() {
     if (!this.context) return;
     const time = this.context.currentTime;
-    this.engineGain.gain.setTargetAtTime(0, time, .05); this.windGain.gain.setTargetAtTime(0, time, .05);
+    this.engineGain.gain.setTargetAtTime(0, time, .05); this.windGain.gain.setTargetAtTime(0, time, .05); this.tyreGain.gain.setTargetAtTime(0, time, .05);
   }
-  update(rpm, speed, throttle, running) {
+  update(rpm, speed, throttle, running, slipping = false) {
     if (!this.context || !this.enabled || !running) { this.silence(); return; }
     const time = this.context.currentTime;
     const frequency = Math.max(32, rpm / 60 * 1.35);
     for (const { oscillator, ratio } of this.oscillators) oscillator.frequency.setTargetAtTime(frequency * ratio, time, .07);
     this.engineFilter.frequency.setTargetAtTime(350 + rpm * .15 + throttle * 900, time, .08);
-    this.engineGain.gain.setTargetAtTime(.1 + throttle * .16, time, .08);
+    this.engineGain.gain.setTargetAtTime(time < (this.cutUntil ?? 0) ? .01 : .1 + throttle * .16, time, .025);
+    this.tyreGain.gain.setTargetAtTime(slipping && speed > 25 ? .08 : 0, time, .06);
     this.windGain.gain.setTargetAtTime(Math.min(.3, speed / 420), time, .14);
     this.windFilter.frequency.setTargetAtTime(400 + speed * 12, time, .1);
   }
+  cut() { if (this.context) this.cutUntil = this.context.currentTime + .09; }
   ping(kind = 'checkpoint') {
     if (!this.context || !this.enabled) return;
     const ctx = this.context, time = ctx.currentTime;
