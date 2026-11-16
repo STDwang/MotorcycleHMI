@@ -45,7 +45,7 @@ export class Electronics {
     const lean = o ? o.lean : bike.lean * 180 / Math.PI, gear = o ? o.gear : bike.gear, brake = o ? 0 : bike.brake, running = this.ignition === 2;
     const power = running ? throttle * torque(rpm) * rpm * Math.PI / 30 / 1000 : 0, load = clamp(power / 150, 0, 1);
     this.fuelRate = running ? .9 + power * .3 : 0;
-    this.fuel = this.has('low_fuel') ? Math.min(this.fuel, 1.9) : Math.max(0, this.fuel - this.fuelRate / 3600 * dt);
+    this.fuel = Math.max(0, this.fuel - this.fuelRate / 3600 * dt);
     const coolantTarget = this.has('overheat') ? 124 : running ? clamp(84 + 24 * load - speed * .14, 76, 108) : this.ambientTemp;
     this.coolant = o?.coolant ?? lerp(this.coolant, coolantTarget, 1 - Math.exp(-dt / (this.has('overheat') ? 5 : 22)));
     const work = o ? 0 : clamp(bike.usage, 0, 1.2);
@@ -58,20 +58,21 @@ export class Electronics {
     const absFault = this.has('abs_fault'), rearSlip = !o && bike.tcsActive ? 1.035 : 1;
     this.values = {
       EngineSpeed: running ? rpm : 0, ThrottlePos: throttle * 100, Gear: gear, EngineRunning: +running, QuickShiftActive: +(!o && bike.shift > 0), EngineLoad: load * 100,
-      CoolantTemp: this.coolant, OilPressureLow: +this.has('oil'), MIL: +(this.has('oil') || this.has('overheat')), FuelLevel: (o?.fuel ?? this.fuel / this.capacity * 100), FuelRate: this.fuelRate, BatteryVoltage: this.voltage,
+      CoolantTemp: this.has('overheat') ? Math.max(124, this.coolant) : this.coolant, OilPressureLow: +this.has('oil'), MIL: +(this.has('oil') || this.has('overheat')), FuelLevel: this.has('low_fuel') ? 10 : (o?.fuel ?? this.fuel / this.capacity * 100), FuelRate: this.fuelRate, BatteryVoltage: this.voltage,
       FrontWheelSpeed: speed * 3.6, RearWheelSpeed: speed * 3.6 * rearSlip, BrakePressure: brake * 18, BrakeSwitch: +(brake > .05), ABSActive: +(!o && bike.absActive && !absFault), ABSFault: +absFault,
       LeanAngle: lean, PitchAngle: o ? 0 : bike.pitch * 180 / Math.PI, LongAccel: o ? 0 : bike.accel, LatAccel: o ? 0 : bike.lateralAccel, YawRate: o ? 0 : bike.yawRate * 180 / Math.PI,
       TCSActive: +(!o && bike.tcsActive), TCSFault: +(this.has('tcs_fault') || absFault), AWCActive: +(!o && bike.awcActive), TCSLevel: MODE_TCS[this.mode], RideMode: MODES.indexOf(this.mode), GripUsage: o ? 0 : clamp(bike.usage, 0, 1.27) * 100,
       TurnLeft: +this.left, TurnRight: +this.right, HighBeam: +this.highBeam, LowBeam: 1, SideStand: 0, Ignition: this.ignition, AmbientLight: o?.light ?? this.ambientLight, AmbientTemp: this.ambientTemp, Odometer: this.odometer,
-      FrontPressure: o?.front ?? this.frontPressure(), RearPressure: o?.rear ?? this.rearPressure(), FrontTyreTemp: this.frontTemp, RearTyreTemp: this.rearTemp, TPMSFault: 0,
+      FrontPressure: o?.front ?? this.frontPressure(), RearPressure: (o?.rear ?? this.rearPressure() + this.leak) - this.leak, FrontTyreTemp: this.frontTemp, RearTyreTemp: this.rearTemp, TPMSFault: 0,
       NextTurnDist: this.nav.dist, NextTurnDir: this.nav.dir, NextTurnNum: this.nav.num, TrackPos: this.nav.pos, RecommendedSpeed: this.nav.speed,
       LapNumber: this.lap.lap, LapsTotal: this.lap.laps, Position: this.lap.position, Entrants: this.lap.entrants, CurrentLapTime: this.lap.time, Sector: this.lap.sector, RaceFlag: this.lap.flag,
       LastLapTime: this.lap.last, BestLapTime: this.lap.best, LapDelta: this.lap.delta,
+      Sector1Status: this.lap.sectors?.[0] ?? 0, Sector2Status: this.lap.sectors?.[1] ?? 0, Sector3Status: this.lap.sectors?.[2] ?? 0,
     };
   }
   // Bus source: a node that is switched off, faulted silent or bus-off transmits nothing.
   source = message => {
-    if (this.ignition === 0 || this.has('bus_off')) return null;
+    if (this.has('bus_off') || (this.ignition === 0 && message.sender !== 'BCM')) return null;
     for (const name of this.faults) if (FAULTS[name].sender === message.sender) return null;
     return this.values;
   };

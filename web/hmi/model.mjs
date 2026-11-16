@@ -30,7 +30,7 @@ const SUPERVISED = ['ENGINE_1', 'ENGINE_2', 'ABS_1', 'IMU_1', 'TCS_1', 'BCM_1', 
 const SIGNALS = ['EngineSpeed', 'ThrottlePos', 'Gear', 'EngineRunning', 'CoolantTemp', 'OilPressureLow', 'MIL', 'FuelLevel', 'FuelRate', 'BatteryVoltage', 'FrontWheelSpeed',
   'RearWheelSpeed', 'BrakePressure', 'ABSActive', 'ABSFault', 'LeanAngle', 'PitchAngle', 'LongAccel', 'LatAccel', 'TCSActive', 'TCSFault', 'AWCActive', 'TCSLevel', 'RideMode', 'GripUsage',
   'TurnLeft', 'TurnRight', 'HighBeam', 'Ignition', 'AmbientLight', 'AmbientTemp', 'Odometer', 'FrontPressure', 'RearPressure', 'FrontTyreTemp', 'RearTyreTemp',
-  'NextTurnDist', 'NextTurnDir', 'NextTurnNum', 'TrackPos', 'RecommendedSpeed', 'LapNumber', 'LapsTotal', 'Position', 'Entrants', 'CurrentLapTime', 'Sector', 'RaceFlag', 'LastLapTime', 'BestLapTime', 'LapDelta'];
+  'NextTurnDist', 'NextTurnDir', 'NextTurnNum', 'TrackPos', 'RecommendedSpeed', 'LapNumber', 'LapsTotal', 'Position', 'Entrants', 'CurrentLapTime', 'Sector', 'RaceFlag', 'LastLapTime', 'BestLapTime', 'LapDelta', 'Sector1Status', 'Sector2Status', 'Sector3Status'];
 const damp = (current, target, rate, dt) => current + (target - current) * (1 - Math.exp(-rate * dt));
 
 export class ClusterModel {
@@ -69,7 +69,8 @@ export class ClusterModel {
     else if (this.power === 'check' && this.powerTime > 1.5) go('run');
     const running = this.power === 'run';
     // During standby (ignition seen, bus later lost) keep running so the fault is visible.
-    const busDead = running && !anyAlive;
+    const lastTraffic = Math.max(...[...store.frames.values()].map(frame => frame.time));
+    const busDead = running && now - lastTraffic > 95;
 
     // Auto theme from the ambient light sensor, with hysteresis and dwell to avoid flicker under bridges.
     const lux = raw.AmbientLight;
@@ -102,7 +103,11 @@ export class ClusterModel {
   evaluateAlerts(values, now, running) {
     const active = [];
     for (const alert of ALERTS) {
-      const state = this.alertState.get(alert.code), hit = running && !!alert.when(values);
+      const state = this.alertState.get(alert.code), hit = running && (values.busDead ? alert.code === 'U0001' : !!alert.when(values));
+      if (values.busDead && alert.code !== 'U0001') {
+        state.active = false; state.since = null; state.clearSince = null;
+        const dtc = this.dtcs.find(d => d.code === alert.code); if (dtc) dtc.active = false;
+      }
       if (hit) { state.clearSince = null; state.since ??= now; if (!state.active && now - state.since >= alert.on) { state.active = true; state.acked = false; state.shownAt = now; this.recordDTC(alert, now); } }
       else { state.since = null; if (state.active) { state.clearSince ??= now; if (now - state.clearSince >= alert.off) { state.active = false; const dtc = this.dtcs.find(d => d.code === alert.code); if (dtc) dtc.active = false; } } }
       if (state.active) active.push({ ...alert, since: state.shownAt, acked: state.acked });
@@ -140,7 +145,8 @@ export class ClusterModel {
         master: check || worst === RED ? (check || this.blink ? 'red' : 'dim') : worst === AMBER ? 'amber' : null,
       },
       nav: { valid: raw.TrackPos != null, distance: raw.NextTurnDist ?? 0, direction: raw.NextTurnDir ?? 0, number: raw.NextTurnNum ?? 0, position: raw.TrackPos ?? 0, advise: raw.RecommendedSpeed ?? 0, map: this.map },
-      lap: { valid: raw.LapNumber != null, number: raw.LapNumber ?? 0, total: raw.LapsTotal ?? 0, position: raw.Position ?? 0, entrants: raw.Entrants ?? 0, time: raw.CurrentLapTime ?? 0, sector: raw.Sector ?? 0, flag: raw.RaceFlag ?? 0, last: raw.LastLapTime ?? 0, best: raw.BestLapTime ?? 0, delta: raw.LapDelta ?? 0 },
+      lap: { valid: raw.LapNumber != null, number: raw.LapNumber ?? 0, total: raw.LapsTotal ?? 0, position: raw.Position ?? 0, entrants: raw.Entrants ?? 0, time: raw.CurrentLapTime ?? 0, sector: raw.Sector ?? 0, flag: raw.RaceFlag ?? 0, last: raw.LastLapTime ?? 0, best: raw.BestLapTime ?? 0, delta: raw.LapDelta ?? 0,
+        sectors: [raw.Sector1Status, raw.Sector2Status, raw.Sector3Status].map(status => ({ status: ['', 'best', 'personal', 'slower'][status] ?? '' })) },
       alerts: this.active ?? [], popup: this.popup, dtcs: this.dtcs, lost,
     };
   }

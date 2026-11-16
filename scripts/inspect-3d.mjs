@@ -1,27 +1,15 @@
-import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
-const { chromium } = createRequire(new URL('../package.json', import.meta.url))('@playwright/test');
-const browser = await chromium.launch({ channel: 'msedge', headless: true });
+import assert from 'node:assert/strict';
+import { launch, open, output, base, advance } from './browser-utils.mjs';
+const browser = await launch();
 try {
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-  page.on('pageerror', error => console.log('PAGE ERROR', error.message));
-  page.on('console', message => { if (message.type() === 'error') console.log('CONSOLE ERROR', message.text()); });
-  await page.goto(process.env.HMI_URL || 'http://127.0.0.1:4176/');
-  await page.waitForFunction(() => !!document.body.dataset.ready, { timeout: 30000 });
-  console.log(await page.locator('body').getAttribute('data-ready'));
-  await page.screenshot({ path: resolve(import.meta.dirname, '../previews/3d-start.png') });
-  if (await page.locator('body').getAttribute('data-ready') === 'true') {
-    await page.locator('[data-mode="1"]').click(); await page.locator('#start-auto').click();
-    await page.waitForFunction(() => +document.querySelector('#speed').textContent >= 100);
-    console.log('Three-digit layout', await page.evaluate(() => {
-      const speed = document.querySelector('.speed-wrap>div:first-child').getBoundingClientRect();
-      const gear = document.querySelector('.gear').getBoundingClientRect();
-      if (speed.right > gear.left) throw new Error('Speed overlaps gear');
-      return { speedRight: speed.right, gearLeft: gear.left };
-    }));
-    await page.screenshot({ path: resolve(import.meta.dirname, '../previews/3d-riding.png') });
-    console.log('FPS', await page.locator('#fps').innerText(), 'distance', await page.locator('body').getAttribute('data-distance'));
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: resolve(import.meta.dirname, '../previews/3d-mobile.png') });
-  }
+  await page.goto(base);
+  await page.waitForFunction(() => document.body.dataset.ready === 'true');
+  const startup = await page.evaluate(() => ({ readyMs: performance.now(), bytes: performance.getEntriesByType('resource').reduce((n, r) => n + r.transferSize, 0), requests: performance.getEntriesByType('resource').length, testApiExposed: '__hmi' in globalThis }));
+  assert.ok(startup.readyMs < 3000, 'first scene ready within 3 seconds'); assert.equal(startup.testApiExposed, false);
+  console.log('Production startup', startup);
+  const { errors } = await open(page); await advance(page, 5);
+  for (const camera of ['chase', 'cockpit', 'cluster', 'cinema']) { await page.waitForTimeout(150); await page.screenshot({ path: resolve(output, `inspect-${camera}.png`), fullPage: true }); await page.locator('#camera').click(); }
+  console.log({ errors, performance: await page.locator('#performance').innerText() });
 } finally { await browser.close(); }

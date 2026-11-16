@@ -1,295 +1,207 @@
-import { parseDBC, encodeFrame, SignalStore, AlertManager, modes } from './model.mjs';
-import { RideSession } from './ride.mjs';
-import { RideWorld } from './world.mjs';
+import { parseDBC, hex, unpackSignal } from './core/can.mjs';
+import { Session, STEP, ENVIRONMENTS, BENCH } from './core/session.mjs';
+import { FAULTS } from './core/ecu.mjs';
+import { ClusterRenderer } from './hmi/cluster.mjs';
+import { tr } from './hmi/i18n.mjs';
+import { RideWorld } from './world/scene.mjs';
 import { RideAudio } from './audio.mjs';
 
 const $ = id => document.getElementById(id);
-const text = (id, value) => { const el = $(id); if (el.textContent !== String(value)) el.textContent = value; };
-const format = (value, digits = 0) => value === null ? '—' : value.toFixed(digits);
-const timer = seconds => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toFixed(1).padStart(4, '0')}`;
-let toastTimer;
-function notify(message, duration = 3300) {
-  text('notice', message); $('notice').classList.add('visible'); clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => $('notice').classList.remove('visible'), duration);
-}
+const text = (id, value) => { if ($(id).textContent !== String(value)) $(id).textContent = value; };
+const timeText = value => Number.isFinite(value) && value > 0 ? `${Math.floor(value / 60)}:${(value % 60).toFixed(2).padStart(5, '0')}` : '—';
+let noticeTimer;
+function notify(value) { text('notice', value); $('notice').classList.add('visible'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').classList.remove('visible'), 3500); }
 
 try {
-  const response = await fetch('./vehicle.dbc'); if (!response.ok) throw new Error('DBC 加载失败');
-  const dbcText = await response.text(), messages = parseDBC(dbcText);
-  const world = new RideWorld($('world'));
-  const ride = new RideSession(world.length), vehicle = ride.vehicle, audio = new RideAudio();
-  let store = new SignalStore(messages), alertManager = new AlertManager();
-  let now = 0, accumulator = 0, received = 0, activeAlerts = [], lastAlert = '', usedCruise = false;
-  let lastTime = performance.now(), lastUI = -1000, fpsTime = lastTime, frameCount = 0, elapsed = 0;
-  let previousEvent = '', previousCollisions = 0, previousCheckpoint = 0, shownFinish = false, best = null;
-  let reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const keys = new Set(), touches = new Map(), rows = new Map(), frameElements = new Map();
-  try { const value = Number(localStorage.getItem('apex.best.alpine.v2')); if (value > 0 && Number.isFinite(value)) best = value; } catch { /* Storage is optional. */ }
-  $('track-length').textContent = `${(world.length / 1000).toFixed(2)} km`;
-  if (innerWidth < 900) world.setQuality(true);
-  for (let i = 0; i < 32; i++) { const bar = document.createElement('i'); if (i > 25) bar.className = 'red'; $('rpm-bars').append(bar); }
-  const bars = [...$('rpm-bars').children];
-  const labels = {
-    Speed: ['车速', 'km/h'], RPM: ['发动机转速', 'rpm'], Gear: ['挡位', ''], Temperature: ['冷却液温度', '°C'], Fuel: ['燃油', '%'],
-    FrontPressure: ['前胎压', 'bar'], RearPressure: ['后胎压', 'bar'], Mode: ['骑行模式', ''], LeftIndicator: ['左转向灯', ''],
-    RightIndicator: ['右转向灯', ''], HighBeam: ['远光灯', ''], ABSFault: ['ABS 故障位', ''],
-  };
-  for (const message of messages.values()) {
-    const frame = document.createElement('div'); frame.className = 'frame';
-    frame.innerHTML = `<div class="frame-head"><b>0x${message.id.toString(16).toUpperCase()}</b><span>${message.name}</span><small>— ms</small></div><div class="frame-bytes">—</div>`;
-    $('frames').append(frame); frameElements.set(message.id, frame);
-    for (const signal of message.signals) {
-      const row = document.createElement('div'); row.className = 'signal'; row.dataset.signal = signal.name;
-      const label = document.createElement('span'); label.className = 'signal-name'; label.textContent = labels[signal.name]?.[0] || signal.name;
-      const detail = document.createElement('small'); detail.textContent = `${signal.name} · ${signal.start}|${signal.length}`; label.append(detail);
-      const value = document.createElement('span'); value.className = 'signal-value';
-      row.append(label, value); $('signals').append(row); rows.set(signal.name, { value, signal });
-    }
-  }
-  const mapPoints = world.samples.filter((_, i) => i % 4 === 0).map(p => ({ x: 75 + p.x * .12, y: 65 + p.z * .12 }));
-  const mapPath = mapPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ') + ' Z';
-  $('track-map').setAttribute('d', mapPath); $('map-progress').setAttribute('d', mapPath);
-  const mapLength = $('map-progress').getTotalLength();
-  $('map-progress').style.strokeDasharray = `${mapLength} ${mapLength}`;
+  const response = await fetch('./core/vehicle.dbc'); if (!response.ok) throw new Error('DBC 加载失败');
+  const session = new Session(parseDBC(await response.text())), messages = session.messages;
+  const cluster = new ClusterRenderer($('cluster')), audio = new RideAudio();
+  const world = new RideWorld($('world'), session.track, $('cluster')); world.setEntries(session.race.entries);
+  world.setQuality(innerWidth < 600 ? 'low' : innerWidth < 1000 ? 'medium' : 'high'); $('quality').value = world.quality;
+  const keys = new Set(), touches = new Map(), signalRows = new Map();
+  let accumulator = 0, lastTime = performance.now(), hudTime = 0, frameMs = 16.7, slowTime = 0, finished = false, bootAt = null;
+  let activeTab = 'bench', tracePaused = false, traceSnapshot = [], gamepadButtons = [], framePeak = 0;
+  const cameraNames = { chase: '追尾视角', cockpit: '座舱视角', cluster: '仪表特写', cinema: '电影视角' };
+  const map = session.track.minimap(), xs = map.map(p => p[0]), zs = map.map(p => p[1]);
+  const minX = Math.min(...xs), minZ = Math.min(...zs), scale = Math.min(145 / (Math.max(...xs) - minX), 115 / (Math.max(...zs) - minZ));
+  const mapPoint = f => [12 + (f.x - minX) * scale, 12 + (f.z - minZ) * scale];
+  $('map-track').setAttribute('d', map.map(([x, z], i) => `${i ? 'L' : 'M'}${mapPoint({ x, z }).join(',')}`).join(' ') + 'Z');
+  text('track-length', `${(session.track.length / 1000).toFixed(2)} KM`);
 
-  function transmit() {
-    if (vehicle.scenario === 'offline') return;
-    const values = vehicle.values();
-    for (const message of messages.values()) if (store.receive(encodeFrame(message, values), now)) received++;
-  }
-  function metric(id, value, unit = '') {
-    const el = $(id), key = String(value) + unit; if (el.dataset.value === key) return;
-    el.dataset.value = key; el.replaceChildren(document.createTextNode(value));
-    if (unit) { const small = document.createElement('small'); small.textContent = unit; el.append(small); }
-  }
-  function controls() {
-    $('cruise').setAttribute('aria-pressed', String(vehicle.auto)); text('cruise', `巡航 ${vehicle.auto ? 'ON' : 'OFF'}`);
-    text('pause', ride.state === 'paused' ? '继续' : '暂停'); $('pause').disabled = !['running', 'paused'].includes(ride.state);
-    document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(+button.dataset.mode === vehicle.mode)));
-    document.querySelectorAll('[data-scenario]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scenario === vehicle.scenario)));
-    for (const [id, value] of [['left', vehicle.left], ['right', vehicle.right], ['beam', vehicle.highBeam]]) $(id).setAttribute('aria-pressed', String(value));
-    document.body.classList.toggle('paused', ride.state === 'paused');
-    document.body.dataset.state = ride.state;
-  }
-  function renderHUD() {
-    const get = name => store.read(name, now);
-    const speed = get('Speed'), rpm = get('RPM'), gear = get('Gear'), mode = get('Mode');
-    text('speed', format(speed)); document.querySelector('.speed-wrap').classList.toggle('triple', speed !== null && speed >= 100);
-    text('rpm', rpm === null ? '—' : (rpm / 1000).toFixed(1));
-    text('gear', gear === null ? '—' : gear === 0 ? 'N' : gear); text('mode-badge', mode === null ? '—' : modes[mode]);
-    bars.forEach((bar, i) => bar.classList.toggle('on', rpm !== null && i < rpm / 14000 * bars.length));
-    $('rpm-bars').setAttribute('aria-valuenow', rpm ?? 0); $('rpm-bars').setAttribute('aria-valuetext', rpm === null ? '信号失效' : `${rpm} rpm`);
-    const blink = reducedMotion || Math.floor(now / 450) % 2 === 0;
-    $('left-lamp').classList.toggle('lit', get('LeftIndicator') === 1 && blink);
-    $('right-lamp').classList.toggle('lit', get('RightIndicator') === 1 && blink);
-    $('beam-lamp').classList.toggle('lit', get('HighBeam') === 1); $('abs-lamp').classList.toggle('lit', get('ABSFault') === 1);
-    metric('fuel', format(get('Fuel')), '%'); metric('temperature', format(get('Temperature')), '°C');
-    text('front-pressure', format(get('FrontPressure'), 2)); text('rear-pressure', format(get('RearPressure'), 2));
-    $('front-pressure').style.color = get('FrontPressure') !== null && get('FrontPressure') < 1.9 ? 'var(--amber)' : '';
-    $('temperature').style.color = get('Temperature') !== null && get('Temperature') >= 110 ? 'var(--red)' : '';
-    text('temp-state', get('Temperature') === null ? 'SIGNAL LOST' : get('Temperature') >= 110 ? 'OVERHEAT' : 'NORMAL');
-    $('fuel-fill').style.width = `${get('Fuel') ?? 0}%`;
-    const healthy = ['Speed', 'FrontPressure', 'Mode'].every(name => get(name) !== null);
-    text('bus-state', healthy ? 'ONLINE' : 'SIGNAL LOST'); $('bus-state').classList.toggle('lost', !healthy); $('bus-dot').style.background = healthy ? '' : 'var(--red)';
-    const signature = JSON.stringify(activeAlerts.map(a => [a.key, a.acknowledged]));
-    if (signature !== lastAlert) {
-      lastAlert = signature; const top = activeAlerts[0];
-      $('alert').className = `alert${top ? top.priority === 3 ? ' critical' : ' warning' : ''}`;
-      text('alert-symbol', top ? '!' : '✓'); text('alert-title', top ? `${top.title}${top.acknowledged ? ' · 已确认' : ''}` : '车辆状态正常');
-      text('alert-detail', top ? top.detail : '信号有效，专注前方的路。');
+  function release() { keys.clear(); touches.clear(); document.querySelectorAll('[data-touch]').forEach(b => b.classList.remove('held')); }
+  function start(mode) {
+    release(); session.start(mode); world.setEntries(session.race.entries); world.setEnvironment(session.environment);
+    finished = false; bootAt = null; accumulator = 0; traceSnapshot = []; tracePaused = false;
+    $('trace-pause').setAttribute('aria-pressed', 'false'); text('trace-pause', '暂停 Trace');
+    $('finish-card').hidden = true; $('pause').setAttribute('aria-pressed', 'false'); text('pause', '暂停');
+    document.querySelectorAll('[data-fault]').forEach(el => el.checked = false);
+    for (const [key, value] of Object.entries(BENCH)) {
+      const el = document.querySelector(`[data-bench="${key}"]`);
+      if (el) { el.value = key === 'light' ? ENVIRONMENTS[session.environment].light : value; el.nextElementSibling.value = el.value; }
     }
-    $('acknowledge').disabled = !activeAlerts.some(a => !a.acknowledged);
-    text('mode-hint', speed === null ? '信号失效' : speed <= 5 ? '≤5 km/h 可切换' : '减速至 ≤5 km/h');
-    text('timer', timer(ride.time + ride.penalty));
-    $('checkpoint').innerHTML = `${ride.checkpoint} <em>/ 4</em>`;
-    $('remaining').innerHTML = `${Math.max(0, (world.length - ride.distance) / 1000).toFixed(2)} <em>km</em>`;
-    text('sector', `SECTOR 0${Math.min(4, ride.checkpoint + 1)}`);
-    text('ride-state', { ready: 'READY TO RIDE', running: vehicle.auto ? 'AUTO CRUISE' : ride.offroad ? 'OFF ROAD' : 'ON THE ROAD', paused: 'PAUSED', finished: 'LOOP COMPLETED' }[ride.state]);
-    $('progress').style.width = `${ride.distance / world.length * 100}%`;
-    $('map-progress').style.strokeDashoffset = String(mapLength * (1 - ride.distance / world.length));
-    const p = world.frame(ride.distance + 8).point; $('map-position').setAttribute('cx', 75 + p.x * .12); $('map-position').setAttribute('cy', 65 + p.z * .12);
-    $('next-checkpoint').innerHTML = `0${Math.min(4, ride.checkpoint + 1)} <small>/ 04</small>`;
-    text('penalties', `碰撞 ${ride.collisions} · 罚时 +${ride.penalty}s`);
-    world.updateBikeDisplay(speed, gear === null ? null : gear === 0 ? 'N' : gear);
-    for (const [name, { value, signal }] of rows) {
-      const reading = get(name), quality = store.quality(name, now);
-      value.className = `signal-value${quality === 'valid' ? '' : ' invalid'}`;
-      value.title = { valid: '有效', stale: '超过 600 ms 未更新', invalid: '物理值越界', missing: '未收到' }[quality];
-      let display = format(reading, signal.factor < 1 ? 2 : 0);
-      if (name === 'Mode' && reading !== null) display = modes[reading];
-      if (name === 'Gear' && reading === 0) display = 'N';
-      value.replaceChildren(document.createTextNode(display));
-      const unit = document.createElement('small'); unit.textContent = labels[name]?.[1] || '';
-      const dot = document.createElement('i'); value.append(unit, dot); value.dataset.quality = quality;
+    if (mode === 'bench') openEngineering('bench'); else $('engineering').hidden = true;
+    updateHUD();
+  }
+  function takeOver() { if (!session.auto || session.mode === 'bench' || session.race.state === 'finished') return; session.takeOver(); updateHUD(); }
+  function togglePause() { session.paused = !session.paused; release(); audio.silence(); text('pause', session.paused ? '继续' : '暂停'); $('pause').setAttribute('aria-pressed', String(session.paused)); updateHUD(); }
+  function camera() { if (session.mode === 'demo') session.mode = 'practice'; const modes = Object.keys(cameraNames); world.cameraMode = modes[(modes.indexOf(world.cameraMode) + 1) % modes.length]; world.started = false; text('camera', cameraNames[world.cameraMode]); }
+  function openEngineering(tab = activeTab) {
+    $('engineering').hidden = false; activeTab = tab;
+    document.querySelectorAll('[data-panel]').forEach(el => el.hidden = el.dataset.panel !== tab);
+    document.querySelectorAll('[data-tab]').forEach(el => el.classList.toggle('active', el.dataset.tab === tab)); updateEngineering();
+  }
+  document.querySelectorAll('[data-start]').forEach(el => el.onclick = () => start(el.dataset.start));
+  $('again').onclick = () => start('race'); $('pause').onclick = togglePause; $('camera').onclick = camera;
+  $('auto').onclick = () => { if (session.mode === 'bench') return; if (session.auto) session.takeOver(); else session.auto = true; updateHUD(); };
+  $('guide-open').onclick = () => { release(); $('guide').showModal(); };
+  $('settings-open').onclick = () => { release(); $('settings').showModal(); };
+  document.querySelectorAll('[data-close]').forEach(el => el.onclick = () => el.closest('dialog').close());
+  $('engineering-open').onclick = () => openEngineering(); $('engineering-close').onclick = () => $('engineering').hidden = true;
+  document.querySelectorAll('[data-tab]').forEach(el => el.onclick = () => openEngineering(el.dataset.tab));
+  $('environment').onchange = event => { session.setEnvironment(event.target.value); world.setEnvironment(session.environment); updateHUD(); };
+  $('assist').onchange = event => { session.assist = event.target.value; notify('辅助已切换；专业模式需要手动控制压弯与刹车。'); };
+  $('quality').onchange = event => { world.setQuality(event.target.value); slowTime = 0; };
+  for (const [id, key] of [['language', 'lang'], ['units', 'units'], ['theme', 'theme']]) $(id).onchange = event => session.settings[key] = event.target.value;
+  $('page').onclick = () => session.hmi.nextPage(); $('ack').onclick = () => session.hmi.acknowledge();
+  $('ride-modes').onclick = event => { const mode = event.target.closest('[data-mode]')?.dataset.mode; if (mode) session.ecu.mode = mode; };
+  $('cluster').onclick = () => session.hmi.acknowledge();
+  $('sound').onclick = async () => { try { if (audio.enabled) audio.mute(); else await audio.enable(); $('sound').setAttribute('aria-pressed', String(audio.enabled)); text('sound', audio.enabled ? '声音 ON' : '声音 OFF'); } catch (error) { notify(error.message); } };
+  $('fullscreen').onclick = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { notify('当前浏览器不支持全屏。'); } };
+
+  const sliderDefs = [['speed', '车速 km/h', 0, 300, 1], ['rpm', '转速 rpm', 0, 14000, 100], ['throttle', '油门 %', 0, 100, 1], ['lean', '倾角 °', -58, 58, 1], ['gear', '挡位', 0, 6, 1], ['coolant', '水温 °C', 40, 130, 1], ['fuel', '燃油 %', 0, 100, 1], ['front', '前胎压 bar', .5, 3.5, .02], ['rear', '后胎压 bar', .5, 3.5, .02], ['light', '光照 lx', 0, 70000, 100]];
+  for (const [key, label, min, max, step] of sliderDefs) {
+    const row = document.createElement('label'), name = document.createElement('span'), input = document.createElement('input'), output = document.createElement('output');
+    name.textContent = label; input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = BENCH[key]; input.dataset.bench = key; input.setAttribute('aria-label', label); output.value = input.value;
+    input.oninput = () => { if (session.ecu.override) session.ecu.override[key] = +input.value; output.value = input.value; };
+    row.append(name, input, output); $('bench-sliders').append(row);
+  }
+  for (const [key, fault] of Object.entries(FAULTS)) {
+    const label = document.createElement('label'), input = document.createElement('input'); input.type = 'checkbox'; input.dataset.fault = key;
+    input.onchange = () => session.setFault(key, input.checked); label.append(input, document.createTextNode(fault.zh)); $('faults').append(label);
+  }
+  $('faults-clear').onclick = () => { for (const name of Object.keys(FAULTS)) session.setFault(name, false); document.querySelectorAll('[data-fault]').forEach(el => el.checked = false); };
+  $('ignition').onclick = () => { session.ecu.ignition = 0; bootAt = session.now + 500; };
+  $('clear-dtcs').onclick = () => session.hmi.clearDTCs();
+  $('trace-pause').onclick = () => { tracePaused = !tracePaused; if (tracePaused) traceSnapshot = [...session.bus.trace]; $('trace-pause').setAttribute('aria-pressed', String(tracePaused)); text('trace-pause', tracePaused ? '继续 Trace' : '暂停 Trace'); updateEngineering(); };
+  for (const message of messages.values()) {
+    const option = document.createElement('option'); option.value = message.id; option.textContent = `0x${message.id.toString(16).toUpperCase()} / ${message.name}`; $('trace-filter').append(option);
+    for (const signal of message.payload) {
+      const row = document.createElement('tr'); row.dataset.signal = signal.name;
+      for (let i = 0; i < 4; i++) row.append(document.createElement('td'));
+      row.children[0].textContent = signal.name; $('signals').append(row); signalRows.set(signal.name, { row, message, signal });
     }
-    for (const [id, el] of frameElements) {
-      const frame = store.frames.get(id), age = frame ? Math.round(now - frame.time) : null;
-      el.querySelector('small').textContent = `${age === null ? '—' : age} ms`;
-      el.querySelector('.frame-bytes').textContent = frame ? [...frame.data].map(value => value.toString(16).toUpperCase().padStart(2, '0')).join(' ') : '—';
-      el.classList.toggle('stale', age === null || age > 600);
+  }
+  $('trace-filter').onchange = updateEngineering;
+  $('export').onclick = () => {
+    const data = { network: 'APEX synthetic CAN', nowMs: session.now, environment: session.environment, mode: session.mode, stats: session.store.stats, dtcs: session.hmi.view.dtcs,
+      signals: Object.fromEntries([...signalRows.keys()].map(name => [name, { value: session.store.read(name, session.now), quality: session.store.quality(name, session.now) }])),
+      trace: session.bus.trace.map(f => ({ id: f.id, dlc: f.dlc, data: [...f.data], time: f.time, period: f.period, valid: f.ok })) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })), a = document.createElement('a'); a.href = url; a.download = 'apex-diagnostics.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  document.querySelectorAll('[data-demo]').forEach(el => el.onclick = () => {
+    $('guide').close(); const kind = el.dataset.demo;
+    if (kind === 'boot') { start('bench'); session.ecu.ignition = 0; bootAt = session.now + 500; }
+    if (kind === 'can' || kind === 'performance') openEngineering('trace');
+    if (kind === 'crc') { start('bench'); session.setFault('crc_abs', true); document.querySelector('[data-fault="crc_abs"]').checked = true; openEngineering('trace'); }
+    if (kind === 'alerts') { start('bench'); session.ecu.override.coolant = 124; session.setFault('oil', true); session.hmi.settings.page = 4; const slider = document.querySelector('[data-bench="coolant"]'); slider.value = 124; slider.dispatchEvent(new Event('input')); document.querySelector('[data-fault="oil"]').checked = true; }
+    if (kind === 'locale') { start('bench'); session.hmi.settings.page = 1; $('settings').showModal(); }
+  });
+  function updateEngineering() {
+    if ($('engineering').hidden) return;
+    const { bus, store, hmi, now } = session;
+    text('engineering-metrics', `${bus.rate} frames/s · ${bus.load.toFixed(1)}% @ 500 kbit/s · RX ${store.stats.received} · CRC ${store.stats.crcErrors} · Counter ${store.stats.counterErrors} | TFT ${cluster.drawMs.toFixed(2)} ms · Frame ${frameMs.toFixed(1)} ms · Peak ${framePeak.toFixed(1)} ms`);
+    if (activeTab === 'bench') document.querySelectorAll('[data-bench]').forEach(el => el.disabled = session.mode !== 'bench');
+    if (activeTab === 'trace') {
+      const filter = $('trace-filter').value, frames = (tracePaused ? traceSnapshot : bus.trace).filter(f => !filter || f.id === +filter).slice(-28).reverse();
+      $('trace-body').replaceChildren(...frames.map(f => {
+        const row = document.createElement('tr'), message = messages.get(f.id), counter = message.counter ? unpackSignal(f.data, message.counter) : '-';
+        for (const value of [`${f.id.toString(16).toUpperCase()} / ${f.dlc}`, hex(f.data), `${counter} / ${f.ok ? 'OK' : 'BAD'}`, `${f.period.toFixed(2)} / ${(f.period - message.cycle).toFixed(2)}`]) { const cell = document.createElement('td'); cell.textContent = value; if (!f.ok) cell.className = 'bad'; row.append(cell); } return row;
+      }));
+      text('periods', [...messages.values()].map(m => { const s = bus.state.get(m.id); return `${m.name}: ${s.count ? s.period.toFixed(2) : '—'}/${m.cycle} ms`; }).join(' · '));
     }
-    text('rx', received); text('rejected', store.rejected);
-    document.body.dataset.distance = ride.distance.toFixed(2); document.body.dataset.lateral = ride.lateral.toFixed(2);
-    controls();
-  }
-  function applyInput() {
-    if (ride.state !== 'running') return;
-    const input = new Set([...keys, ...touches.values()]);
-    const throttle = input.has('w') || input.has('arrowup') || input.has('throttle');
-    const brake = input.has('s') || input.has('arrowdown') || input.has('brake');
-    if (throttle || brake) vehicle.auto = false;
-    if (!vehicle.auto) { vehicle.throttle = throttle ? .95 : 0; vehicle.brake = brake ? 1 : 0; }
-    ride.steering = +(input.has('d') || input.has('arrowright') || input.has('right')) - +(input.has('a') || input.has('arrowleft') || input.has('left'));
-  }
-  function releaseInputs() {
-    keys.clear(); touches.clear(); vehicle.throttle = 0; vehicle.brake = 0; ride.steering = 0;
-    document.querySelectorAll('.touch-controls .held').forEach(button => button.classList.remove('held'));
-  }
-  function start(auto = false) {
-    if (ride.state === 'finished') reset();
-    ride.start(); vehicle.auto = auto; if (auto) usedCruise = true;
-    $('start-card').hidden = true; $('finish-card').hidden = true; controls();
-    notify(auto ? '自动巡航中。按 W / S 接管，A / D 转向。' : 'W 加速 · S 刹车 · A / D 转向。沿公路穿过四个检查点。');
-  }
-  function reset() {
-    releaseInputs(); ride.reset(); store = new SignalStore(messages); alertManager = new AlertManager();
-    now = 0; accumulator = 0; received = 0; usedCruise = false; previousEvent = ''; previousCollisions = 0; previousCheckpoint = 0; shownFinish = false;
-    $('start-card').hidden = false; $('finish-card').hidden = true; transmit(); activeAlerts = alertManager.update(store, now);
-    renderHUD(); audio.silence(); notify('已重置，准备新的一圈。');
-  }
-  function pause() {
-    if (ride.state === 'running') { ride.pause(); releaseInputs(); audio.silence(); notify('已暂停。按 P 或点击继续恢复。'); }
-    else if (ride.state === 'paused') { ride.start(); notify('继续骑行。'); }
-    controls();
-  }
-  function finish() {
-    shownFinish = true; releaseInputs(); audio.silence(); audio.ping();
-    const total = ride.time + ride.penalty;
-    if (!usedCruise && (best === null || total < best)) {
-      best = total; try { localStorage.setItem('apex.best.alpine.v2', String(best)); } catch { /* Optional persistence. */ }
+    if (activeTab === 'signals') for (const [name, { row, message, signal }] of signalRows) {
+      const value = store.read(name, now), age = now - store.frames.get(message.id).time;
+      row.children[1].textContent = value === null ? '---' : `${Number(value.toFixed(2))} ${signal.unit}`;
+      row.children[2].textContent = store.quality(name, now); row.children[2].className = value === null ? 'bad' : '';
+      row.children[3].textContent = Number.isFinite(age) ? Math.round(age) : '—';
     }
-    text('result-time', timer(total)); text('result-detail', `骑行 ${timer(ride.time)} · 碰撞 ${ride.collisions} 次 · 罚时 +${ride.penalty}s`);
-    text('best-time', usedCruise ? '本圈使用过巡航，不计入手动最佳成绩。' : `本机手动最佳 ${timer(best)}`);
-    $('finish-card').hidden = false;
+    if (activeTab === 'dtc') $('dtcs').replaceChildren(...(hmi.view.dtcs.length ? hmi.view.dtcs.map(d => { const el = document.createElement('p'); el.className = d.active ? 'active' : ''; el.textContent = `${d.code} · ${tr(session.settings.lang, d.code)} · ${d.active ? '当前' : '历史'} ×${d.count}`; return el; }) : [Object.assign(document.createElement('p'), { textContent: '系统正常 · 无故障码' })]));
   }
-  $('start').addEventListener('click', () => start(false)); $('start-auto').addEventListener('click', () => start(true));
-  $('pause').addEventListener('click', pause); $('reset').addEventListener('click', reset); $('again').addEventListener('click', () => { reset(); start(false); });
-  $('cruise').addEventListener('click', () => {
-    if (ride.state === 'ready' || ride.state === 'finished') start(true);
-    else { vehicle.auto = !vehicle.auto; if (vehicle.auto) usedCruise = true; if (ride.state === 'paused') ride.start(); notify(vehicle.auto ? '自动巡航已接管。' : '已切回手动驾驶。'); controls(); }
-  });
-  $('modes').addEventListener('click', event => {
-    const button = event.target.closest('[data-mode]'); if (!button) return;
-    if (store.read('Speed', now) === null) { notify('CAN 信号失效，暂不能确认模式切换。'); return; }
-    notify(vehicle.setMode(+button.dataset.mode) ? `已切换 ${modes[vehicle.mode]} 模式。` : '模式切换被拦截：请先减速至 5 km/h 以下。'); controls();
-  });
-  for (const [id, property] of [['left', 'left'], ['right', 'right'], ['beam', 'highBeam']]) $(id).addEventListener('click', () => {
-    vehicle[property] = !vehicle[property];
-    if (property === 'left' && vehicle.left) vehicle.right = false;
-    if (property === 'right' && vehicle.right) vehicle.left = false; controls();
-  });
-  $('scenarios').addEventListener('click', event => {
-    const button = event.target.closest('[data-scenario]'); if (!button) return;
-    vehicle.scenario = button.dataset.scenario;
-    notify(vehicle.scenario === 'offline' ? 'CAN 已中断。600 ms 后仪表信号失效；车辆仍可驾驶。' : vehicle.scenario === 'normal' ? '已恢复正常信号。' : '故障从 ECU 注入，观察左侧报文与右侧告警。'); controls();
-  });
-  $('acknowledge').addEventListener('click', () => { alertManager.acknowledge(); notify('已确认，提示将持续到故障恢复。'); });
-  $('sound').addEventListener('click', async () => {
-    try {
-      if (audio.enabled) audio.mute(); else await audio.enable();
-      $('sound').setAttribute('aria-pressed', String(audio.enabled)); $('sound').querySelector('span').textContent = audio.enabled ? 'ON' : 'OFF';
-      notify(audio.enabled ? '合成音效已开启：发动机 / 风噪 / 碰撞提示。' : '已静音。');
-    } catch (error) { notify(error.message); }
-  });
-  $('quality').addEventListener('click', () => {
-    const low = world.quality !== 'low'; world.setQuality(low); $('quality').setAttribute('aria-pressed', String(low)); $('quality').querySelector('span').textContent = low ? '流畅' : '高';
-    notify(low ? '流畅画质：降低渲染分辨率与远处树木数量。' : '高画质已开启。');
-  });
-  $('fullscreen').addEventListener('click', async () => {
-    try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
-    catch { notify('此浏览器无法进入全屏。'); }
-  });
-  $('help').addEventListener('click', () => {
-    if (ride.state === 'running') { ride.pause(); releaseInputs(); audio.silence(); controls(); }
-    $('about').showModal(); $('help').setAttribute('aria-expanded', 'true');
-  });
-  $('close-help').addEventListener('click', () => $('about').close());
-  $('about').addEventListener('close', () => $('help').setAttribute('aria-expanded', 'false'));
-  $('about').addEventListener('click', event => { if (event.target === $('about')) { const rect = $('about').getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) $('about').close(); } });
-  for (const [id, className] of [['telemetry-toggle', 'show-can'], ['dashboard-toggle', 'show-dashboard']]) $(id).addEventListener('click', () => {
-    const open = document.body.classList.toggle(className); $(id).setAttribute('aria-expanded', String(open));
-    const other = className === 'show-can' ? 'show-dashboard' : 'show-can'; document.body.classList.remove(other);
-    $(id === 'telemetry-toggle' ? 'dashboard-toggle' : 'telemetry-toggle').setAttribute('aria-expanded', 'false');
-  });
-  $('telemetry-toggle').setAttribute('aria-controls', 'signals');
-  $('dashboard-toggle').setAttribute('aria-controls', 'dashboard-panel'); document.querySelector('.dashboard').id = 'dashboard-panel';
-  $('export').addEventListener('click', () => {
-    const data = { project: 'APEX / procedural 3D / synthetic CAN', timestamp: new Date().toISOString(), dbc: dbcText,
-      session: { state: ride.state, distance: ride.distance, lateral: ride.lateral, time: ride.time, penalty: ride.penalty, collisions: ride.collisions, usedCruise },
-      signals: Object.fromEntries([...rows.keys()].map(name => [name, { value: store.read(name, now), quality: store.quality(name, now) }])),
-      frames: [...store.frames.values()].map(frame => ({ id: frame.id, data: [...frame.data], ageMs: now - frame.time })), alerts: activeAlerts, receivedFrames: received };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'apex-ride-diagnostics.json'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
-  $('portfolio').href = 'https://stdwang.github.io/penpenWeb/';
-  $('portfolio').title = '返回个人作品集';
-  const drivingKeys = ['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+  function updateHUD() {
+    const v = session.hmi.view, race = session.race, mode = session.mode;
+    document.body.dataset.ready = 'true'; document.body.dataset.state = session.paused ? 'paused' : race.state; document.body.dataset.mode = mode;
+    text('session-title', mode === 'demo' ? '让每一次骑行，清晰可见。' : mode === 'bench' ? '把每个状态，握在手中。' : mode === 'race' ? '八位骑手，两圈较量。' : '找到属于你的入弯节奏。');
+    text('session-hint', session.paused ? '已暂停 · P 继续' : mode === 'demo' ? '自动演示中 · 按任意键或触摸画面接管' : mode === 'bench' ? 'HMI 实验台 · 调节信号，观察仪表响应' : session.auto ? '自动驾驶中 · W / S / A / D 接管' : 'W / S 油门与刹车 · A / D 转向 · C 切换视角');
+    text('position', v.lap.valid ? `P${v.lap.position} / ${v.lap.entrants}` : '—'); text('lap', v.lap.valid ? `${v.lap.number} / ${v.lap.total || '∞'}` : '—'); text('lap-time', v.lap.valid ? timeText(v.lap.time) : '—');
+    if (v.nav.valid) { const f = session.track.frame(v.nav.position * session.track.length), [x, y] = mapPoint(f); $('map-dot').setAttribute('cx', x); $('map-dot').setAttribute('cy', y); } $('map-dot').style.display = v.nav.valid ? '' : 'none';
+    for (let i = 0; i < 3; i++) $('sector-colors').children[i].className = v.lap.sectors?.[i]?.status ?? '';
+    $('start-lights').classList.toggle('idle', race.state !== 'countdown'); [...$('start-lights').children].forEach((el, i) => el.classList.toggle('lit', race.lights > i));
+    text('auto', `自动驾驶 ${session.auto ? 'ON' : 'OFF'}`); $('auto').setAttribute('aria-pressed', String(session.auto));
+    text('cluster-status', `${v.power.toUpperCase()} / ${v.busDead ? 'BUS OFF' : v.night ? 'NIGHT' : 'DAY'} · ${v.mode}`);
+    text('cluster-accessible', `${v.speed.valid ? Math.round(v.speed.value) + ' km/h' : '车速信号丢失'}，挡位 ${v.gear ?? '丢失'}，${v.popup ? tr(session.settings.lang, v.popup.code) : '无未确认告警'}`);
+    document.querySelectorAll('[data-mode]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.mode === v.mode)));
+    document.querySelectorAll('.session-nav [data-start]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.start === mode)));
+    text('performance', `${(1000 / Math.max(1, frameMs)).toFixed(0)} FPS · TFT ${cluster.drawMs.toFixed(2)} ms · ${world.quality.toUpperCase()}`); updateEngineering();
+  }
   addEventListener('keydown', event => {
-    if (event.ctrlKey || event.metaKey || event.altKey || $('about').open || event.target instanceof HTMLElement && (event.target.matches('input,textarea,select') || event.target.isContentEditable)) return;
-    const key = event.key.toLowerCase();
-    if (drivingKeys.includes(key)) {
-      event.preventDefault(); if (ride.state === 'ready') start(false); keys.add(key); return;
-    }
-    if (event.repeat) return;
-    if (key === 'p') { event.preventDefault(); pause(); }
-    if (key === 'r') { event.preventDefault(); reset(); }
-    if (key === 'q') $('left').click(); if (key === 'e') $('right').click(); if (key === 'l') $('beam').click();
+    if (event.ctrlKey || event.altKey || event.metaKey || event.target.matches('input,select,textarea') || $('settings').open || $('guide').open) return;
+    const key = event.key.toLowerCase(); if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'tab'].includes(key)) event.preventDefault();
+    if (session.mode === 'demo') takeOver(); keys.add(key); if (event.repeat) return;
+    if (key === 'p') togglePause(); if (key === 'r') start(session.mode === 'demo' ? 'practice' : session.mode); if (key === 'c') camera();
+    if (key === 'enter') session.hmi.acknowledge(); if (key === 'tab') session.hmi.nextPage();
+    if (key === 'q') session.ecu.left = !session.ecu.left; if (key === 'e') session.ecu.right = !session.ecu.right; if (key === 'l') session.ecu.highBeam = !session.ecu.highBeam;
+    if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) takeOver();
   });
-  addEventListener('keyup', event => keys.delete(event.key.toLowerCase()));
-  document.querySelectorAll('[data-touch]').forEach(button => {
-    button.addEventListener('pointerdown', event => {
-      event.preventDefault(); if (ride.state === 'ready') start(false);
-      button.setPointerCapture(event.pointerId); touches.set(event.pointerId, button.dataset.touch); button.classList.add('held');
-    });
-    const release = event => { touches.delete(event.pointerId); if (![...touches.values()].includes(button.dataset.touch)) button.classList.remove('held'); };
-    for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(name, release);
-  });
-  const suspend = () => { releaseInputs(); if (ride.state === 'running') { ride.pause(); controls(); } audio.silence(); };
-  addEventListener('blur', suspend);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) suspend(); lastTime = performance.now(); fpsTime = lastTime; frameCount = 0; });
-  addEventListener('world-context-lost', () => { suspend(); notify('图形上下文已丢失，请刷新页面恢复 3D 场景。', 20000); });
-  matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', event => { reducedMotion = event.matches; });
-  transmit(); activeAlerts = alertManager.update(store, now); renderHUD();
-  world.update(ride, 0, .016, reducedMotion); document.body.dataset.ready = 'true';
-  notify('山湖环线已生成。点击开始，或按 W 出发。');
-  function tick(timestamp) {
-    const dt = Math.min(.1, Math.max(0, (timestamp - lastTime) / 1000)); lastTime = timestamp;
-    if (!document.hidden) {
-      elapsed += dt; now += dt * 1000; accumulator += dt; applyInput();
-      while (accumulator >= .05) { ride.step(.05); transmit(); accumulator -= .05; }
-      activeAlerts = alertManager.update(store, now);
-      if (ride.lastEvent !== previousEvent) {
-        previousEvent = ride.lastEvent;
-        if (ride.lastEvent) notify(ride.lastEvent);
-      }
-      if (ride.collisions > previousCollisions) {
-        previousCollisions = ride.collisions; audio.ping('collision'); document.querySelector('.vignette').classList.add('collision-flash');
-        setTimeout(() => document.querySelector('.vignette').classList.remove('collision-flash'), 250);
-      }
-      if (ride.checkpoint > previousCheckpoint) { previousCheckpoint = ride.checkpoint; audio.ping(); }
-      if (ride.state === 'finished' && !shownFinish) finish();
-      audio.update(vehicle.values().RPM, vehicle.speed, vehicle.throttle, ride.state === 'running');
-      world.update(ride, elapsed, dt, reducedMotion);
-      if (timestamp - lastUI >= 100) { renderHUD(); lastUI = timestamp; }
-      frameCount++;
-      if (timestamp - fpsTime >= 1000) { text('fps', Math.round(frameCount * 1000 / (timestamp - fpsTime))); frameCount = 0; fpsTime = timestamp; }
-    }
-    requestAnimationFrame(tick);
+  addEventListener('keyup', event => keys.delete(event.key.toLowerCase())); addEventListener('blur', release);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { release(); audio.silence(); } lastTime = performance.now(); accumulator = 0; });
+  $('world').onpointerdown = () => takeOver();
+  for (const button of document.querySelectorAll('[data-touch]')) {
+    button.onpointerdown = event => { event.preventDefault(); button.setPointerCapture(event.pointerId); touches.set(event.pointerId, button.dataset.touch); button.classList.add('held'); takeOver(); };
+    button.onlostpointercapture = button.onpointerup = button.onpointercancel = event => { touches.delete(event.pointerId); button.classList.remove('held'); };
   }
-  requestAnimationFrame(tick);
-} catch (error) {
-  console.error(error); document.body.dataset.ready = 'error';
-  const panel = document.createElement('div'); panel.className = 'startup-error';
-  panel.textContent = `3D 场景启动失败：${error.message}。请使用支持 WebGL2 的浏览器，确认硬件加速已开启，并通过 HTTP 服务访问。`;
-  document.body.append(panel); $('start-card').hidden = true; text('bus-state', 'ERROR');
-}
+  function input() {
+    const has = (...values) => values.some(v => keys.has(v) || [...touches.values()].includes(v));
+    const state = { throttle: +has('w', 'arrowup', 'throttle'), brake: +has('s', 'arrowdown', 'brake'), steer: +has('d', 'arrowright', 'right') - +has('a', 'arrowleft', 'left') };
+    const pad = navigator.getGamepads?.()[0];
+    if (pad && !$('settings').open && !$('guide').open) {
+      const axis = Math.abs(pad.axes[0]) > .12 ? pad.axes[0] : 0, throttle = pad.buttons[7]?.value ?? 0, brake = pad.buttons[6]?.value ?? 0;
+      if (axis || throttle > .05 || brake > .05) { takeOver(); state.steer = axis; state.throttle = throttle; state.brake = brake; }
+      for (const [index, action] of [[0, () => session.hmi.acknowledge()], [3, camera], [9, togglePause]]) if (pad.buttons[index]?.pressed && !gamepadButtons[index]) action();
+      gamepadButtons = pad.buttons.map(b => b.pressed);
+    }
+    return state;
+  }
+  function step(state) {
+    if (bootAt !== null && session.now >= bootAt) { session.ecu.ignition = 2; bootAt = null; }
+    session.step(state);
+    for (const event of session.events) {
+      if (event.type === 'jumpstart') notify('抢跑：成绩加罚 5 秒。');
+      if (event.type === 'crash' && event.entry.player) { audio.ping('collision'); notify('车辆摔倒，赛道救援即将复位。'); }
+      if (event.type === 'upshift' || event.type === 'downshift') audio.cut?.(); if (event.type === 'sector') audio.ping();
+    }
+    if (session.race.state === 'finished' && !finished) {
+      finished = true; const p = session.race.player; text('result', `P${p.position} · 最快 ${timeText(p.best)} · 总成绩 ${timeText(p.finishTime + (p.penalty ?? 0))} · 摔车 ${p.crashes} 次`);
+      $('classification').replaceChildren(...session.race.order.map(e => Object.assign(document.createElement('li'), { textContent: `${e.name} · ${e.finished ? timeText(e.finishTime + (e.penalty ?? 0)) : '+' + e.gap.toFixed(0) + ' m'}` })));
+      $('finish-card').hidden = false; release(); audio.ping();
+    }
+  }
+  let lastAlert = '';
+  function render(stamp) {
+    const elapsed = Math.min(.1, Math.max(0, (stamp - lastTime) / 1000)); lastTime = stamp;
+    frameMs += (elapsed * 1000 - frameMs) * .04; framePeak = Math.max(framePeak, elapsed * 1000);
+    if (!document.hidden) {
+      accumulator = Math.min(accumulator + elapsed, STEP * 12); const state = input();
+      while (accumulator >= STEP) { step(state); accumulator -= STEP; }
+      cluster.draw(session.hmi.view); world.update(session.poses(session.paused ? 1 : accumulator / STEP), session, elapsed, stamp / 1000);
+      const v = session.hmi.view; audio.update(v.rpm.valid ? v.rpm.value : 0, v.speed.valid ? v.speed.value : 0, v.throttle / 100, !session.paused && v.power === 'run', v.abs.active || v.tcs.active);
+      if (v.popup?.code && v.popup.code !== lastAlert) audio.ping('warning'); lastAlert = v.popup?.code ?? '';
+      slowTime = 1000 / Math.max(1, frameMs) < (world.quality === 'low' ? 30 : 50) ? slowTime + elapsed : 0;
+      if (slowTime > 3 && world.quality !== 'low') { world.setQuality(world.quality === 'high' ? 'medium' : 'low'); $('quality').value = world.quality; slowTime = 0; notify('已根据帧率自动降低画质。'); }
+      if (stamp - hudTime > 150) { updateHUD(); hudTime = stamp; }
+    }
+    requestAnimationFrame(render);
+  }
+  if (new URLSearchParams(location.search).has('test')) globalThis.__hmi = { session, world, cluster, start, updateHUD,
+    advance(seconds, state = {}) { for (let i = 0; i < Math.round(seconds / STEP); i++) step(state); cluster.draw(session.hmi.view); updateHUD(); return { state: session.race.state, laps: session.race.player.laps, crashes: session.crashes, outside: session.outside }; } };
+  updateHUD(); requestAnimationFrame(render);
+} catch (error) { console.error(error); document.body.dataset.ready = 'error'; notify(`无法启动：${error.message}`); text('session-hint', '请确认浏览器支持 WebGL 2，并通过本地服务器打开项目。'); }

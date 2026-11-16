@@ -107,7 +107,7 @@ export class ClusterRenderer {
     c.fillStyle = css(p.panel, .55 - .2 * this.t); c.fillRect(0, y, W, H - y); c.fillStyle = css(p.line, .9); c.fillRect(0, y, W, 1);
     const low = v.fuel.valid && v.fuel.value < 12, hot = v.coolant.valid && v.coolant.value >= 108;
     this.text(tr(lang, 'fuel'), 48, 465, 15, css(p.dim)); this.bar(96, 453, 120, 10, v.fuel.valid ? v.fuel.value / 100 : 0, low ? this.color(AMBER) : css(p.ink));
-    this.text(v.range !== null ? `${Math.round(v.range)} km` : v.fuel.valid ? `${Math.round(v.fuel.value)}%` : '--', 228, 465, 17, css(p.ink), 'left', NUM, 600);
+    this.text(v.range !== null ? `${Math.round(v.range * (v.settings.units === 'imperial' ? .621371 : 1))} ${v.settings.units === 'imperial' ? 'mi' : 'km'}` : v.fuel.valid ? `${Math.round(v.fuel.value)}%` : '--', 228, 465, 17, css(p.ink), 'left', NUM, 600);
     this.text(tr(lang, 'coolant'), 318, 465, 15, css(p.dim)); this.bar(366, 453, 120, 10, v.coolant.valid ? (v.coolant.value - 40) / 90 : 0, hot ? this.color(RED) : css(p.ink));
     this.text(v.coolant.valid ? this.temp(v.coolant.value) : '--', 498, 465, 17, css(hot ? mix(RED[0], RED[1], this.t) : p.ink), 'left', NUM, 600);
     // Mode / TCS / ABS chips
@@ -148,7 +148,7 @@ export class ClusterRenderer {
     }
     this.text(tr(lang, 'last'), x, y + 180, 14, css(p.dim)); this.text(lapTime(lap.last), x + 58, y + 181, 22, css(p.ink), 'left', NUM, 600);
     this.text(tr(lang, 'best'), x, y + 212, 14, css(p.dim)); this.text(lapTime(lap.best), x + 58, y + 213, 22, this.color(lap.best > 0 ? [[150, 40, 200], [200, 120, 255]] : [p.dim, p.dim]), 'left', NUM, 600);
-    for (let i = 0; i < 3; i++) { this.round(x + 208 + i * 36, y + 198, 30, 8, 4); this.ctx.fillStyle = i < lap.sector ? this.color(GREEN) : i === lap.sector && v.blink ? this.color(this.accent) : css(p.line); this.ctx.fill(); }
+    for (let i = 0; i < 3; i++) { this.round(x + 208 + i * 36, y + 198, 30, 8, 4); const status = lap.sectors?.[i]?.status; this.ctx.fillStyle = status === 'best' ? '#ba6be5' : status === 'personal' ? this.color(GREEN) : status === 'slower' ? this.color(AMBER) : css(p.line); this.ctx.fill(); }
     this.text(tr(lang, 'sector'), x + 208, y + 181, 14, css(p.dim));
   }
   pedals(y) {
@@ -176,7 +176,7 @@ export class ClusterRenderer {
     this.text('×1000 rpm', cx, cy + 118, 14, css(p.dim), 'center', NUM, 600);
     this.speedBlock(690, 330, 180);
     const lang = this.lang, cons = v.trip.consumption;
-    this.text(tr(lang, 'range'), 560, 408, 14, css(p.dim), 'right'); this.text(v.range !== null ? `${Math.round(v.range)} km` : '--', 570, 409, 22, css(p.ink), 'left', NUM, 600);
+    this.text(tr(lang, 'range'), 560, 408, 14, css(p.dim), 'right'); this.text(v.range !== null ? `${Math.round(v.range * (v.settings.units === 'imperial' ? .621371 : 1))} ${v.settings.units === 'imperial' ? 'mi' : 'km'}` : '--', 570, 409, 22, css(p.ink), 'left', NUM, 600);
     this.text(tr(lang, 'avg_fuel'), 760, 408, 14, css(p.dim), 'right'); this.text(cons !== null ? `${cons.toFixed(1)} L/100` : '--', 770, 409, 22, css(p.ink), 'left', NUM, 600);
   }
 

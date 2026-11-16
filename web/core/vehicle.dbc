@@ -94,6 +94,9 @@ BO_ 784 LAP_1: 8 TBOX
  SG_ CurrentLapTime : 16|20@1+ (0.01,0) [0|10485.8] "s" IPC
  SG_ Sector : 36|2@1+ (1,0) [0|3] "" IPC
  SG_ RaceFlag : 38|3@1+ (1,0) [0|4] "" IPC
+ SG_ Sector1Status : 41|2@1+ (1,0) [0|3] "" IPC
+ SG_ Sector2Status : 43|2@1+ (1,0) [0|3] "" IPC
+ SG_ Sector3Status : 45|2@1+ (1,0) [0|3] "" IPC
  SG_ LAP_1_Counter : 52|4@1+ (1,0) [0|15] "" IPC
  SG_ LAP_1_CRC : 56|8@1+ (1,0) [0|255] "" IPC
 

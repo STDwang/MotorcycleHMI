@@ -8,6 +8,7 @@ export function parseDBC(text) {
     if ((m = line.match(/^BS_:\s*(\d+)/))) baud = +m[1];
     else if ((m = line.match(/^BO_\s+(\d+)\s+(\w+)\s*:\s*(\d+)\s+(\w+)/))) {
       current = { id: +m[1], name: m[2], dlc: +m[3], sender: m[4], cycle: 100, comment: '', signals: [] };
+      if (current.id > 0x7ff || current.dlc < 1 || current.dlc > 8 || messages.has(current.id)) throw new Error('Invalid or duplicate CAN message');
       messages.set(current.id, current);
     } else if ((m = line.match(/^SG_\s+(\w+)\s*:\s*(\d+)\|(\d+)@([01])([+-])\s*\(([^,]+),([^)]+)\)\s*\[([^|]+)\|([^\]]+)\]\s*"([^"]*)"/)) && current) {
       current.signals.push({ name: m[1], start: +m[2], length: +m[3], littleEndian: m[4] === '1', signed: m[5] === '-', factor: +m[6], offset: +m[7], min: +m[8], max: +m[9], unit: m[10], message: current.name, values: null });
@@ -19,6 +20,14 @@ export function parseDBC(text) {
     }
   }
   for (const message of messages.values()) {
+    const occupied = new Set();
+    for (const signal of message.signals) {
+      if (!Number.isFinite(signal.factor) || signal.factor <= 0 || signal.length < 1 || signal.length > 32 || signal.min > signal.max) throw new Error('Invalid DBC signal');
+      for (const bit of bitPositions(signal)) {
+        if (bit < 0 || bit >= message.dlc * 8 || occupied.has(bit)) throw new Error('Overlapping or out-of-frame DBC signal');
+        occupied.add(bit);
+      }
+    }
     message.counter = message.signals.find(s => s.name.endsWith('_Counter')) || null;
     message.crc = message.signals.find(s => s.name.endsWith('_CRC')) || null;
     message.payload = message.signals.filter(s => s !== message.counter && s !== message.crc);
@@ -104,7 +113,7 @@ export class CanBus {
 export class SignalStore {
   constructor(messages) {
     this.messages = messages; this.signals = new Map(); this.frames = new Map(); this.index = new Map();
-    this.stats = { received: 0, crcErrors: 0, counterErrors: 0, unknown: 0 };
+    this.stats = { received: 0, crcErrors: 0, counterErrors: 0, unknown: 0, malformed: 0 };
     for (const message of messages.values()) {
       this.frames.set(message.id, { time: -Infinity, counter: -1, count: 0, data: null, crcErrors: 0, counterErrors: 0 });
       for (const signal of message.payload) this.index.set(signal.name, { signal, message });
@@ -113,6 +122,7 @@ export class SignalStore {
   receive(frame, now) {
     const message = this.messages.get(frame.id);
     if (!message) { this.stats.unknown++; return false; }
+    if (!(frame.data instanceof Uint8Array) || frame.data.length !== message.dlc || (frame.dlc != null && frame.dlc !== message.dlc)) { this.stats.malformed++; return false; }
     const state = this.frames.get(frame.id);
     if (message.crc && frame.data[message.dlc - 1] !== crc8(frame.data, message.dlc - 1, message.id)) { this.stats.crcErrors++; state.crcErrors++; return false; }
     if (message.counter) {
@@ -130,7 +140,10 @@ export class SignalStore {
   quality(name, now) {
     const entry = this.index.get(name); if (!entry) return 'missing';
     const state = this.frames.get(entry.message.id);
-    return state.count === 0 ? 'missing' : now - state.time > entry.message.timeout ? 'timeout' : 'valid';
+    if (state.count === 0) return 'missing';
+    if (now - state.time > entry.message.timeout) return 'timeout';
+    const value = this.signals.get(name), signal = entry.signal;
+    return !Number.isFinite(value) || value < signal.min || value > signal.max ? 'invalid' : 'valid';
   }
   read(name, now) { return this.quality(name, now) === 'valid' ? this.signals.get(name) : null; }
   alive(messageName, now) {

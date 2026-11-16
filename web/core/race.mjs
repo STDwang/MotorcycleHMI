@@ -41,7 +41,7 @@ export class Race {
       if (this.options.mode !== 'race') entry.bike.gear = 2;
       Object.assign(entry, {
         distance: slot.s, lap: 0, lapStart: 0, lapTime: 0, laps: [], best: Infinity, last: 0, sector: 0, sectorStart: 0,
-        sectors: [], bestSectors: [Infinity, Infinity, Infinity], finished: false, finishTime: 0, position: entry.grid + 1,
+        sectors: [], lastSectors: [], bestSectors: [Infinity, Infinity, Infinity], penalty: 0, jumped: false, finished: false, finishTime: 0, position: entry.grid + 1,
         reaction: entry.player ? 0 : .18 + (entry.grid * 37 % 10) * .022, gap: 0, delta: 0, crashes: 0, topSpeed: 0, maxLean: 0, refSplits: null, lapSplits: [],
       });
     }
@@ -53,6 +53,9 @@ export class Race {
     this.events.length = 0;
     if (this.state === 'grid') { for (const e of this.entries) e.bike.step(dt, { hold: true }, true); return; }
     if (this.state === 'countdown') {
+      if (!autoPlayer && input.throttle > .1 && !this.player.jumped) {
+        this.player.jumped = true; this.player.penalty = 5; this.events.push({ type: 'jumpstart', entry: this.player });
+      }
       this.clock += dt; const lit = Math.min(5, Math.floor(this.clock / LIGHT_INTERVAL));
       if (lit !== this.lights) { this.lights = lit; this.events.push({ type: 'light', count: lit }); }
       if (this.clock >= LIGHT_INTERVAL * 5 + 1.1) { this.state = 'racing'; this.lights = 0; this.lightsOut = true; this.time = 0; this.events.push({ type: 'go' }); }
@@ -98,7 +101,7 @@ export class Race {
       const time = entry.lapTime, improved = time < entry.best, record = time < this.sessionBest;
       entry.laps.push(time); entry.last = time; if (improved) { entry.best = time; entry.refSplits = [...entry.lapSplits]; }
       this.sessionBest = Math.min(this.sessionBest, time);
-      entry.lap = lap + 1; entry.lapStart = this.time; entry.sector = 0; entry.sectors = []; entry.lapSplits = [];
+      entry.lastSectors = [...entry.sectors]; entry.lap = lap + 1; entry.lapStart = this.time; entry.sectorStart = this.time; entry.sector = 0; entry.sectors = []; entry.lapSplits = [];
       if (lap >= this.laps) { entry.finished = true; entry.finishTime = this.time; entry.lap = this.laps; }
       if (entry.player) this.events.push({ type: 'lap', entry, time, improved, record, final: entry.finished });
     }
@@ -136,7 +139,7 @@ export class Race {
     }
   }
   classify() {
-    const order = [...this.entries].sort((a, b) => (a.finished && b.finished ? a.finishTime - b.finishTime : b.finished - a.finished || b.distance - a.distance));
+    const order = [...this.entries].sort((a, b) => (a.finished && b.finished ? (a.finishTime + a.penalty) - (b.finishTime + b.penalty) : b.finished - a.finished || b.distance - a.distance));
     const leader = order[0];
     order.forEach((entry, index) => { entry.position = index + 1; entry.gap = leader.distance - entry.distance; });
     this.order = order;
